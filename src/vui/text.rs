@@ -313,6 +313,13 @@ impl TextSystem {
         Ok(())
     }
 
+    /// Forget what a frame that was never sent drew. It drew the scene already on screen, whose
+    /// layouts stay held until something replaces it; counting them as drawn would keep them for
+    /// one replacement longer than that.
+    pub(crate) fn discard_frame(&mut self) {
+        self.drawn.clear();
+    }
+
     /// Forget everything. A host that changed its fonts or its scale invalidates every
     /// measurement and every shape at once.
     pub(crate) fn invalidate(&mut self, overlay: &OverlayWindow) {

@@ -25,6 +25,8 @@ mod gif_viewer;
 mod gradient;
 #[path = "../examples/views/grid_layout.rs"]
 mod grid_layout;
+#[path = "../examples/views/hello_world.rs"]
+mod hello_world;
 #[path = "../examples/views/image_gallery.rs"]
 mod image_gallery;
 #[path = "../examples/views/image_loading.rs"]
@@ -686,6 +688,27 @@ fn wrapping_and_truncation_reach_the_host_as_paragraphs_with_widths() {
         clamped.height().get() > one_line.height().get(),
         "two lines are taller than one: {clamped:?} {one_line:?}"
     );
+}
+
+/// A floating window has no dismissal of its own, so the loop gives it one: escape always, and
+/// `q` where nothing in the window takes typed text. The window asks for focus when it opens, so
+/// neither waits for a click first.
+#[test]
+fn escape_or_q_ends_the_loop_and_a_field_keeps_q_for_typing() {
+    let mut ui = TestUi::start(hello_world::Counter::default(), 420., 240.).unwrap();
+    ui.focus_window().unwrap();
+    let q = usage_of("q").unwrap();
+    ui.key(q, true, modifiers::CONTROL).unwrap();
+    assert!(!ui.quitting(), "a chord is somebody else's shortcut");
+    ui.key(q, true, 0).unwrap();
+    assert!(ui.quitting(), "q ends a window with no field");
+
+    let mut ui = TestUi::start(Editor::default(), 420., 240.).unwrap();
+    ui.focus_window().unwrap();
+    ui.key(q, true, 0).unwrap();
+    assert!(!ui.quitting(), "a window with a field spends q on typing");
+    ui.key(usage_of("escape").unwrap(), true, 0).unwrap();
+    assert!(ui.quitting(), "escape ends any window");
 }
 
 #[test]

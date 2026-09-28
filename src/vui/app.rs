@@ -414,6 +414,10 @@ impl UiApp {
     ) -> io::Result<WindowId> {
         let bounds = Bounds::from_wire(options.bounds);
         let overlay = Arc::new(self.session.create_window(options)?);
+        // The host delivers keys only to a window that asked, and a window just opened is the one
+        // the user is looking at. Best-effort, as a press asking is: a host that declines still
+        // shows the window.
+        let _ = overlay.request_focus();
         let shared = WindowShared::new(bounds, Size::new(bounds.width().0, bounds.height().0));
         *shared.overlay.borrow_mut() = Some(Arc::clone(&overlay));
         *shared.session.borrow_mut() = Some(Rc::clone(&self.session));
@@ -518,12 +522,21 @@ impl UiApp {
         &self.windows[index].shared
     }
 
+    #[cfg(feature = "testing")]
+    pub(crate) fn quitting(&self) -> bool {
+        self.shared.quit.get()
+    }
+
     fn dispatch(&mut self, event: OverlayLaneEvent) -> io::Result<()> {
         match event {
             OverlayLaneEvent::Input(input) => {
                 for entry in &self.windows {
                     if self.session.event_targets(&input, &entry.overlay)? {
-                        entry.shared.route(&input.event)?;
+                        if is_quit_key(&input.event, &entry.shared) {
+                            self.shared.quit.set(true);
+                        } else {
+                            entry.shared.route(&input.event)?;
+                        }
                         break;
                     }
                 }
@@ -618,6 +631,33 @@ impl UiApp {
             (None, Ok(())) => Ok(()),
         }
     }
+}
+
+/// Whether this key ends the application.
+///
+/// These windows are floating, and the protocol only dismisses a *popup* on escape or an outside
+/// press — so a floating window has no way out of its own unless it gives itself one. Escape
+/// always ends it. `q` does too, except where something in the window accepts typed text: a
+/// window with a field in it cannot spend a letter on quitting, so there escape is the only way.
+fn is_quit_key(event: &vivid_protocol::overlay::Event, window: &WindowShared) -> bool {
+    let vivid_protocol::overlay::Event::Key {
+        physical,
+        down: true,
+        repeat: false,
+        modifiers,
+    } = *event
+    else {
+        return false;
+    };
+    let named = |name| crate::vui::keymap::usage_of(name) == Some(physical);
+    if named("escape") {
+        return true;
+    }
+    let modifiers = crate::vui::interactive::Modifiers::from_bits(modifiers);
+    // A chord is somebody else's shortcut, not this.
+    named("q")
+        && !(modifiers.control() || modifiers.alt() || modifiers.command())
+        && !window.accepts_text()
 }
 
 impl Drop for UiApp {

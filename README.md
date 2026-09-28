@@ -45,6 +45,10 @@ Against a live Vivido, using the same environment as any producer:
 cargo run --example hello_world
 ```
 
+A window asks for focus when it opens, and **escape or `q` ends the loop** — a floating window has
+no dismissal of its own. A window where something takes typed text spends `q` on typing, as
+`input` and `tab_stop` do; escape still ends those.
+
 | Example | What it shows |
 |---|---|
 | `hello_world` | Text and a button, and the smallest app skeleton there is |

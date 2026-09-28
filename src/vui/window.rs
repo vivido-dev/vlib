@@ -467,6 +467,18 @@ impl WindowShared {
         }
     }
 
+    /// Whether anything in the frame on screen takes typed text.
+    pub(crate) fn accepts_text(&self) -> bool {
+        let frame = self.frame.borrow();
+        let mut accepts = false;
+        if let Some(frame) = frame.as_ref() {
+            frame.tree.walk(&mut |node| {
+                accepts |= node.interactions.handlers.text.is_some();
+            });
+        }
+        accepts
+    }
+
     /// The action a key press names, if the window has a binding for it.
     fn binding_for(&self, key: u32, modifiers: Modifiers) -> Option<ActionId> {
         self.bindings
@@ -799,6 +811,11 @@ pub(crate) fn submit_if_changed(shared: &Rc<WindowShared>, painted: &Painted) ->
     *shared.editor_caret.borrow_mut() = painted.editor_caret;
     let changed = shared.submitted.borrow().as_ref() != Some(&painted.canvas);
     if !changed {
+        // A scene still pending is what the next replacement keeps the layouts of, and it is
+        // among what this frame counted as drawn; only with none pending is that count moot.
+        if shared.pending.borrow().is_none() {
+            shared.text.borrow_mut().discard_frame();
+        }
         return Ok(false);
     }
     let overlay = shared.overlay().ok_or_else(|| {
@@ -844,11 +861,27 @@ fn publish_semantics(shared: &Rc<WindowShared>) -> io::Result<()> {
             shared.describes.set(false);
             return Ok(());
         }
+        // A host that is not showing the described scene — it moved on, or a relay has not shown
+        // its copy yet — declines without the description being wrong. The next presented frame
+        // describes itself again, so this one is dropped rather than ending the application.
+        if declined_for_now(&error) {
+            return Ok(());
+        }
         // Anything else is this frame's description being wrong, which is worth knowing about
         // rather than swallowing: the next frame would be wrong the same way.
         return Err(error);
     }
     Ok(())
+}
+
+/// Whether the host refused a request over its own state rather than over what was sent.
+fn declined_for_now(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<vivid_sdk::PresenterError>())
+        .is_some_and(|refusal| {
+            !refusal.fatal && refusal.code != vivid_protocol::messages::ERROR_BAD_MESSAGE
+        })
 }
 
 /// Let go of the shapes the scene just replaced was drawing.
@@ -883,4 +916,34 @@ pub(crate) fn poll_submission(
         *shared.pending_semantics.borrow_mut() = None;
     }
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vivid_protocol::messages::{ERROR_BAD_MESSAGE, ERROR_BAD_STATE, ErrorDetail};
+
+    fn refusal(code: u64, fatal: bool) -> io::Error {
+        io::Error::other(vivid_sdk::PresenterError {
+            code,
+            request_id: 5,
+            detail: ErrorDetail::new(Vec::new()).unwrap(),
+            fatal,
+            diagnostic: "outer overlay host refused request".into(),
+        })
+    }
+
+    #[test]
+    fn a_description_the_host_is_not_ready_for_is_dropped_and_a_wrong_one_is_not() {
+        // A scene the host is not showing yet, or any more: the next frame describes itself.
+        assert!(declined_for_now(&refusal(ERROR_BAD_STATE, false)));
+        // A description the host could not read is this producer's bug.
+        assert!(!declined_for_now(&refusal(ERROR_BAD_MESSAGE, false)));
+        // A fatal refusal ends the session whatever it was about.
+        assert!(!declined_for_now(&refusal(ERROR_BAD_STATE, true)));
+        // A tree the toolkit itself found invalid never reached a host.
+        assert!(!declined_for_now(&io::Error::other(
+            "semantic tree size is out of range"
+        )));
+    }
 }

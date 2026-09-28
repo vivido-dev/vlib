@@ -87,6 +87,11 @@ impl<V: Render + 'static> TestUi<V> {
         &mut self.app
     }
 
+    /// Whether the loop is on its way out, as escape or `q` asks it to be.
+    pub fn quitting(&self) -> bool {
+        self.app.quitting()
+    }
+
     /// Whether an element is currently pressed.
     pub fn pressed(&self, region: u64) -> bool {
         self.shared().element_state(region).pressed
