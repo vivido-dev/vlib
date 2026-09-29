@@ -1,0 +1,38 @@
+{
+  "name": "@vivido/vlib",
+  "version": "0.1.0",
+  "description": "Libraries over Vivid Protocol 1.5 for TypeScript producers; @vivido/vlib/vui is the pane-overlay UI layer",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vivido-dev/vlib"
+  },
+  "exports": {
+    "./vui": {
+      "types": "./dist/vui/index.d.ts",
+      "import": "./dist/vui/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README-typescript.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p ts",
+    "typecheck": "tsc -p ts --noEmit",
+    "test": "node --test ts/tests/*.test.mjs",
+    "build:examples": "tsc -p examples/typescript",
+    "typecheck:examples": "tsc -p examples/typescript --noEmit"
+  },
+  "dependencies": {
+    "@vivido/vivid-sdk": "file:../vivid_sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

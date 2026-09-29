@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vlib"
+version = "0.1.0"
+description = "Libraries over Vivid Protocol 1.5 for Python producers; vlib.vui is the pane-overlay UI layer"
+readme = "README-python.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Wensheng Wang", email = "wenshengwang@gmail.com" }]
+keywords = ["terminal", "graphics", "overlay", "ui"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Typing :: Typed",
+]
+# Pure Python over the SDK's bindings: no native code of its own, and nothing else.
+dependencies = ["vivid-sdk"]
+
+[project.urls]
+Repository = "https://github.com/vivido-dev/vlib"
+
+[project.optional-dependencies]
+test = ["mypy>=1.8,<2", "pytest>=7.4"]
+
+[tool.uv.sources]
+vivid-sdk = { path = "../vivid_sdk", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["python-tests"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+files = ["python/vlib", "python-tests", "examples/python"]
+# The toolkit, the examples beside it, and the SDK it is built on — which ships its own
+# types, so they are followed rather than skipped. Skipping them would turn every geometry
+# value into Any and quietly weaken the whole strict pass.
+mypy_path = "python:examples/python:../vivid_sdk/python"
+
+[[tool.mypy.overrides]]
+module = ["pytest", "pytest.*", "vivid_sdk._native"]
+follow_imports = "skip"
+ignore_missing_imports = true
