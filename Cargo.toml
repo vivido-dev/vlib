@@ -14,9 +14,14 @@ testing = ["vivid_sdk/testing"]
 [dependencies]
 # Decoding is the producer's job, not the host's: the protocol carries raw RGBA, and putting an
 # untrusted decoder in the terminal would be a decoder in the terminal.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = [
+  "png",
+  "jpeg",
+  "gif",
+  "webp",
+] }
 resvg = { version = "0.48", default-features = false }
-taffy = "0.13"
+taffy = "0.14"
 usvg = { version = "0.48", default-features = false }
 vivid_protocol = { version = "1.5", path = "../vivid_protocol" }
 vivid_sdk = { version = "1.5", path = "../vivid_sdk" }

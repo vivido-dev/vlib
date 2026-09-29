@@ -91,6 +91,15 @@ impl Length {
     fn basis(self) -> Dimension {
         self.dimension()
     }
+
+    /// A min or max size takes no sizing keywords, so it is the narrower type.
+    fn bound(self) -> LengthPercentageAuto {
+        match self {
+            Self::Auto => LengthPercentageAuto::auto(),
+            Self::Px(Pixels(value)) => LengthPercentageAuto::length(value),
+            Self::Percent(fraction) => LengthPercentageAuto::percent(fraction),
+        }
+    }
 }
 
 /// One grid track, as `grid-template-columns` and `grid-template-rows` express it.
@@ -238,12 +247,12 @@ impl LayoutStyle {
                 height: self.height.dimension(),
             },
             min_size: TaffySize {
-                width: self.min_width.dimension(),
-                height: self.min_height.dimension(),
+                width: self.min_width.bound(),
+                height: self.min_height.bound(),
             },
             max_size: TaffySize {
-                width: self.max_width.dimension(),
-                height: self.max_height.dimension(),
+                width: self.max_width.bound(),
+                height: self.max_height.bound(),
             },
             margin: self.margin.map(LengthPercentageAuto::length),
             padding: self.padding.map(LengthPercentage::length),
