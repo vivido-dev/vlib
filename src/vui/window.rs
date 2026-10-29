@@ -425,6 +425,8 @@ impl WindowShared {
                     Slot::Accessibility,
                 );
             }
+            // An event kind this build does not know has nowhere to go.
+            _ => {}
         }
         Ok(())
     }

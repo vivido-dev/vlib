@@ -139,16 +139,16 @@ impl Drawing<'_> {
         };
         self.segments = self.segments.saturating_add(path.segments.len());
         if self.segments > MAX_TOTAL_SEGMENTS {
-            self.refused(InvalidScene("scene path budget exceeded"));
+            self.refused("scene path budget exceeded");
             return None;
         }
         Some(path)
     }
 
-    fn refused(&mut self, error: InvalidScene) {
+    fn refused(&mut self, reason: impl std::fmt::Display) {
         self.fail(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("the canvas cannot be drawn ({error})"),
+            format!("the canvas cannot be drawn ({reason})"),
         ));
     }
 
