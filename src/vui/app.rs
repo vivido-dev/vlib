@@ -602,6 +602,12 @@ impl UiApp {
                     }
                 }
             }
+            OverlayLaneEvent::EditorEdit(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "native document editing is unavailable in this toolkit",
+                ));
+            }
             OverlayLaneEvent::ConnectionLost { diagnostic } => {
                 return Err(io::Error::new(io::ErrorKind::ConnectionAborted, diagnostic));
             }
