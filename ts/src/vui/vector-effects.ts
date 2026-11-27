@@ -362,80 +362,328 @@ export function glowPath(
   }
 }
 
-/** Paint animated flame contours and embers above a horizontal fuel bed. */
+const thermalRamp = [
+  [107, 30, 16],
+  [198, 60, 17],
+  [250, 117, 24],
+  [255, 181, 56],
+  [255, 226, 134],
+  [255, 248, 219],
+] as const;
+function thermalColor(heat: number): number {
+  const value = Math.max(0, Math.min(1, heat)) * 5;
+  const i = Math.min(Math.floor(value), 4),
+    f = value - i;
+  const lo = thermalRamp[i]!,
+    hi = thermalRamp[i + 1]!;
+  const channel = (k: 0 | 1 | 2) => Math.round(lo[k] + (hi[k] - lo[k]) * f);
+  return (channel(0) << 16) | (channel(1) << 8) | channel(2);
+}
+function sway(z: number, phase: number, time: number): number {
+  // Older parcels have travelled farther through the drifting, curling velocity field.
+  const age = time - z * 1.15;
+  return (
+    z *
+    (0.15 * Math.sin(phase + 2.1 * age) +
+      0.085 * Math.sin(1.73 * phase - 3.7 * age + 5.3 * z))
+  );
+}
+/** Draw turbulent, cooling plumes above a fuel bed. Time is in seconds. */
 export function fire(
   c: Canvas,
   bounds: overlay.Rect,
   [left, base]: XY,
   options: { width: number; height: number; embers: number; time: number },
 ): void {
-  const { width, height: flameHeight, embers, time } = options;
-  const full = Path.rectangle(bounds);
+  const { width, height, embers, time } = options;
+  if (width <= 0 || height <= 0) return;
   c.fill(
-    full,
+    Path.rectangle(bounds),
     radial(
-      [left + width / 2, base - 3],
-      width * (114 / 220),
-      [0, tint(0xf55b24, 0.38)],
-      [1, tint(0xa03728, 0)],
+      [left + width / 2, base],
+      width * 0.64,
+      [0, tint(0xff7d29, 0.21)],
+      [0.56, tint(0xe34b1d, 0.06)],
+      [1, tint(0xc33e16, 0)],
     ),
   );
-  // Nested heat contours curl sideways with altitude; their roots stay attached.
-  const plume: [number, number, number][] = [];
-  for (let j = 0; j <= 128; j++) {
-    const u = j / 128,
-      xx = left + width * u,
-      wind = Math.sin(xx * 0.092 - time * 1.8);
-    const swirl = xx * 0.36 + 1.5 * wind + time * 1.9;
-    const noise =
-      0.52 +
-      0.3 * Math.sin(swirl) +
-      0.16 * Math.sin(swirl * 1.94 - time * 3.3) +
-      0.1 * Math.sin(xx * 0.91 + time * 4.2);
-    const envelope = Math.max(0, Math.sin(Math.PI * u)) ** 0.24;
-    plume.push([
-      xx,
-      flameHeight *
-        (0.16 + Math.min(1, Math.max(0, noise)) ** 1.4 * 0.85) *
-        envelope,
-      wind,
-    ]);
-  }
-  for (let band = 0; band < 24; band++) {
-    const heat = band / 23,
-      altitude = (1 - heat * 0.94) ** 1.45;
-    const path = new Path().moveTo(left, base);
-    for (const [xx, height, wind] of plume) {
-      const rise = height * altitude;
-      const sway =
-        rise *
-        (0.13 * Math.sin(rise * 0.15 - time * 2.1 + xx * 0.09) + 0.08 * wind);
-      path.lineTo(xx + sway, base - rise);
-    }
-    const red = Math.floor(174 + 81 * Math.min(1, heat / 0.42));
-    const green = Math.floor(35 + 220 * heat ** 0.9),
-      blue = Math.floor(25 + 195 * heat ** 3);
-    const color = (red << 16) | (green << 8) | blue;
-    c.fill(
-      path
-        .lineTo(left + width, base + 2)
-        .lineTo(left, base + 2)
-        .close(),
-      Brush.solid(tint(color, 0.1 + 0.69 * heat)),
+  const unit = Path.rectangle(rect(-1, -1, 2, 2));
+  // Broad smoke, orange plumes, then incandescent cores. Each soft parcel is
+  // sheared along its local velocity to follow the stream without hard edges.
+  const layers = [
+    {
+      count: 12,
+      slices: 5,
+      altitude: 1.32,
+      spread: 1.3,
+      gain: 0,
+      opacity: 0.064,
+    },
+    {
+      count: 25,
+      slices: 8,
+      altitude: 1.02,
+      spread: 1.12,
+      gain: 0.82,
+      opacity: 0.68,
+    },
+    {
+      count: 32,
+      slices: 7,
+      altitude: 0.78,
+      spread: 1.12 * 0.78,
+      gain: 1.02,
+      opacity: 0.83,
+    },
+  ];
+  c.save();
+  try {
+    c.clip(
+      Path.rectangle(
+        rect(left - width * 0.25, base - height * 2, width * 1.5, height * 2),
+      ),
     );
+    for (const [
+      layer,
+      { count, slices, altitude, spread, gain, opacity },
+    ] of layers.entries()) {
+      for (let i = 0; i < count; i++) {
+        const seed = i * 2.399963 + layer * 1.71;
+        const u = (i + 0.5 + 0.3 * Math.sin(seed * 3.7)) / count;
+        const edge = Math.min(1, u * 12, (1 - u) * 12);
+        const phase = u * 32 + 0.65 * Math.sin(seed) + layer * 0.34;
+        for (let k = slices - 1; k >= 0; k--) {
+          const z = k / slices,
+            age = time - z * 0.86;
+          const fuel =
+            0.66 +
+            0.21 * Math.sin(u * 25 + 1.45 * Math.sin(u * 9 + age) - 2.1 * age) +
+            0.15 * Math.sin(u * 53 + age * 3.4) +
+            0.08 * Math.cos(u * 11 - age);
+          const flicker =
+            0.94 +
+            0.15 * Math.sin(seed + age * 3.9) +
+            0.08 * Math.sin(seed * 2.7 - age * 6.7);
+          const rise =
+            height * fuel * flicker * (0.35 + 0.65 * edge) * altitude;
+          const x = left + width * u + rise * sway(z, phase, time),
+            y = base - z * rise;
+          const pulse =
+            0.5 +
+            0.5 *
+              Math.sin(
+                seed + time * 4.5 - z * 10 + 0.6 * Math.sin(phase + z * 6),
+              );
+          const half =
+            (width / count) *
+            spread *
+            (1 - 0.88 * z) *
+            (0.86 + 0.2 * Math.sin(phase + z * 8 - age * 4)) *
+            (1 - z * 0.58 * (1 - pulse));
+          const length = rise * (0.24 - 0.06 * z);
+          const tilt =
+            (sway(z + 0.02, phase, time) - sway(z - 0.02, phase, time)) / 0.04;
+          const power =
+            opacity * (1 - z) ** 0.75 * (1 - z * 0.75 * (1 - pulse));
+          const rgb =
+            layer === 0
+              ? 0x806958
+              : thermalColor(
+                  (1 - z) ** 1.35 * gain +
+                    0.085 * Math.sin(seed + z * 12 - age * 3),
+                );
+          const brush = radial(
+            [0, 0],
+            1,
+            [0, tint(rgb, power)],
+            [0.35, tint(rgb, power * 0.87)],
+            [0.7, tint(rgb, power * 0.34)],
+            [1, tint(rgb, 0)],
+          );
+          c.save();
+          try {
+            c.transform(half, 0, length * tilt, -length, x, y).fill(
+              unit,
+              brush,
+            );
+          } finally {
+            c.restore();
+          }
+        }
+      }
+    }
+  } finally {
+    c.restore();
   }
-  for (let j = 0; j < 22; j++) {
-    const t = (time * (0.32 + Math.sin(j * 0.76) * 0.12) + j * 0.618) % 1,
-      px = left + width * ((5 + j * 9.8) / 220) + Math.sin(t * 5 + j) * 3,
-      py =
-        base - 5 - t * flameHeight * (0.8 + 0.6 * Math.abs(Math.sin(j * 2.3))),
-      r = 0.35 + 0.42 * (1 - t);
+  if (embers <= 0) return;
+  for (let i = 0; i < 22; i++) {
+    const seed = i * 2.399963,
+      cycles = time * (0.36 + 0.12 * Math.sin(seed)) + i * 0.618034;
+    const age = cycles - Math.floor(cycles);
+    const drift = Math.sin(age * 5 + seed) - Math.sin(seed);
+    const x = left + (width * (i + 0.5)) / 22 + height * 0.09 * age * drift;
+    const y = base - height * age * (0.8 + 0.44 * Math.abs(Math.sin(seed)));
+    const alpha =
+      embers *
+      Math.min(1, age * 12, (1 - age) * 4) *
+      (0.65 + 0.35 * Math.sin(seed) ** 2);
+    const r = Math.min(width, height) * (0.004 + 0.006 * (1 - age));
     c.fill(
-      rounded([px, py, r * 1.4, r * 2.7], r * 0.7),
-      Brush.solid(tint(0xffd38a, embers * (1 - t))),
+      Path.rectangle(rect(x - 3 * r, y - 3 * r, 6 * r, 6 * r)),
+      radial(
+        [x, y],
+        3 * r,
+        [0, tint(0xff9440, alpha * 0.35)],
+        [1, tint(0xff7125, 0)],
+      ),
+    );
+    c.fill(
+      Path.ellipse(rect(x - r, y - 2 * r, 2 * r, 4 * r)),
+      vertical(
+        y - 2 * r,
+        4 * r,
+        [0, tint(0xffeb96, alpha)],
+        [1, tint(0xff6027, alpha * 0.15)],
+      ),
     );
   }
 }
+interface RimPoint {
+  x: number;
+  y: number;
+  nx: number;
+  ny: number;
+}
+function rimSample(shape: RoundedBox, guide: number, u: number): RimPoint {
+  const [x, y, w, h] = shape.rect,
+    r = Math.min(Math.max(0, shape.radius), w / 2, h / 2);
+  const radius = r + guide,
+    arc = (radius * Math.PI) / 2;
+  let distance = u * (2 * (w + h - 4 * r) + 4 * arc);
+  // Each tangent ends in a quarter circle with a continuous outward normal.
+  const tangents = [
+    [1, 0],
+    [0, 1],
+    [-1, 0],
+    [0, -1],
+  ] as const;
+  for (const [side, [tx, ty]] of tangents.entries()) {
+    const length = (side % 2 === 0 ? w : h) - 2 * r;
+    const cx = side < 2 ? x + w - r : x + r,
+      cy = side === 0 || side === 3 ? y + r : y + h - r;
+    if (distance <= length)
+      return {
+        x: cx + radius * ty - (length - distance) * tx,
+        y: cy - radius * tx - (length - distance) * ty,
+        nx: ty,
+        ny: -tx,
+      };
+    distance -= length;
+    if (distance <= arc || side === 3) {
+      const angle = distance / radius,
+        nx = ty * Math.cos(angle) + tx * Math.sin(angle),
+        ny = -tx * Math.cos(angle) + ty * Math.sin(angle);
+      return { x: cx + radius * nx, y: cy + radius * ny, nx, ny };
+    }
+    distance -= arc;
+  }
+  throw new Error("a full lap ends on the fourth arc");
+}
+
+/** Draw a flowing violet and cyan plasma border. Width is in logical units. */
+export function plasma(
+  c: Canvas,
+  shape: RoundedBox,
+  options: { width: number; intensity: number; time: number },
+): void {
+  const { width, intensity, time } = options;
+  const [x, y, w, h] = shape.rect;
+  if (Math.min(w, h, width, intensity) <= 0) return;
+  const r = Math.min(Math.max(0, shape.radius), w / 2, h / 2),
+    guide = width * 0.58;
+  const rim = rounded(
+    [x - guide, y - guide, w + 2 * guide, h + 2 * guide],
+    r + guide,
+  );
+  for (const [spread, opacity] of [
+    [3.2, 0.035],
+    [2.5, 0.055],
+    [1.9, 0.08],
+    [1.4, 0.11],
+    [0.95, 0.14],
+  ] as const) {
+    c.stroke(
+      rim,
+      Brush.solid(tint(0x7563ec, opacity * intensity)),
+      width * spread,
+    );
+  }
+  const count = 128;
+  const samples = Array.from({ length: count }, (_, k) =>
+    rimSample(shape, guide, k / count),
+  );
+  for (let j = 0; j < 6; j++) {
+    const phase = j * 2.399963;
+    const points = samples.map(({ x, y, nx, ny }, k): XY => {
+      const a = (2 * Math.PI * k) / count;
+      const offset =
+        width *
+        (0.31 *
+          Math.sin(3 * a + phase + time * 1.5 + 0.8 * Math.sin(2 * a - time)) +
+          0.19 *
+            Math.sin(
+              7 * a - 2.4 * time + phase * 2 + 0.8 * Math.cos(3 * a + time),
+            ));
+      return [x + nx * offset, y + ny * offset];
+    });
+    const last = points[count - 1]!,
+      first = points[0]!;
+    const path = new Path().moveTo(
+      (last[0] + first[0]) / 2,
+      (last[1] + first[1]) / 2,
+    );
+    points.forEach((p, k) => {
+      const q = points[(k + 1) % count]!;
+      path.quadTo(...p, (p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
+    });
+    path.close();
+    c.stroke(path, Brush.solid(tint(0x8473ff, intensity * 0.19)), width * 0.41);
+    c.stroke(
+      path,
+      Brush.solid(tint(j % 2 ? 0x9fc4ff : 0x9c8bff, intensity * 0.48)),
+      width * 0.12,
+    );
+    for (let crest = 0; crest < 2; crest++) {
+      const cycles = time * (0.067 + 0.006 * j) + j * 0.381966 + crest * 0.5;
+      const start = cycles - Math.floor(cycles);
+      const upper: XY[] = [],
+        lower: XY[] = [];
+      for (let step = 0; step <= 16; step++) {
+        const pos = (start + step * 0.007) * count;
+        const k = Math.floor(pos) % count,
+          next = (k + 1) % count,
+          f = pos - Math.floor(pos);
+        const mix = (a: number, b: number) => a + (b - a) * f;
+        const p = points[k]!,
+          q = points[next]!;
+        const px = mix(p[0], q[0]),
+          py = mix(p[1], q[1]);
+        const half = width * 0.125 * Math.sin((Math.PI * step) / 16) ** 2;
+        const a = samples[k]!,
+          b = samples[next]!,
+          dx = mix(a.nx, b.nx) * half,
+          dy = mix(a.ny, b.ny) * half;
+        upper.push([px + dx, py + dy]);
+        lower.push([px - dx, py - dy]);
+      }
+      const streak = new Path().moveTo(...upper[0]!);
+      for (const point of upper.slice(1)) streak.lineTo(...point);
+      for (let k = 15; k >= 1; k--) streak.lineTo(...lower[k]!);
+      c.fill(streak.close(), Brush.solid(tint(0xcbf1ff, intensity * 0.88)));
+    }
+  }
+}
+
 function magnify(
   c: Canvas,
   paint: Paint,

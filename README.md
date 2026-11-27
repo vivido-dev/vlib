@@ -178,6 +178,8 @@ pane does with a frame, and that stays the manual acceptance the Rust examples c
 
 Run `cargo run --release --example effects_lab` in a Vivido pane. The eight scenes use native vector paths, gradients, shadows, and text. Each redraw scales the artwork to the current stage, including on HiDPI displays. Select a tab and use its parameter buttons to change the effect.
 
+The **Fire** tab shows curling flames and a plasma border together. Height and Embers adjust the fire. Speed changes both animations, and zero freezes the current frame. To put plasma around your own control, draw its border before the control’s fill. For example, use `vector::plasma(c, RoundedBox::new([40., 30., 96., 28.], 14.), 3., 1., elapsed)?`.
+
 In **Pulse**, click the stage for a ripple or press the blue arrow to send a ping across to the inbox. **Electricity** has a branching arc between two terminals, current around a card, a button that charges on hover, and a short discharge to the point you click.
 
 Applications can draw the same effects through `vlib::vui::effects::vector`. Use `lamp`, `flashlight`, and `god_rays` with a `Scene` containing your logical bounds and surfaces. Use `glow` for a panel or `glow_path` for lettering, and place `fire` along a baseline. For `liquid_glass`, supply a lens and a callback that replays the background and foreground beneath it. Keep hit regions and input handling outside that callback.

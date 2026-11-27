@@ -72,6 +72,7 @@ pub struct Lab {
     from: f64,
     target: f64,
     changed: f64,
+    fire_time_offset: f64,
 }
 
 impl Lab {
@@ -94,6 +95,7 @@ impl Lab {
             from: 1.,
             target: 1.,
             changed: 0.,
+            fire_time_offset: 0.,
         })
     }
 
@@ -252,6 +254,11 @@ impl Render for Lab {
                         }))
                 }))
         });
+        let scene_time = if selected == 4 {
+            now * knobs[1] + self.fire_time_offset
+        } else {
+            now
+        };
         let buttons = page.controls.iter().enumerate().map(|(i, k)| {
             let v = self.value(i);
             let value = if selected == 3 && i == 0 {
@@ -264,6 +271,10 @@ impl Render for Lab {
                 .on_click(cx.listener(move |s: &mut Self, _, cx| {
                     let index = &mut s.indices[selected][i];
                     *index = (*index + 1) % s.pages[selected].controls[i].values.len();
+                    if selected == 4 && i == 1 {
+                        // Keep both thermal effects on the same frame as the speed changes.
+                        s.fire_time_offset += cx.elapsed().as_secs_f64() * (v - s.value(i));
+                    }
                     cx.notify();
                 }))
         });
@@ -321,7 +332,7 @@ impl Render for Lab {
                             pos,
                             knobs,
                             level,
-                            now,
+                            now: scene_time,
                             wave,
                             shots: &shots,
                         }

@@ -10,6 +10,9 @@ use vivid_protocol::vector::{
     Rect, Scalar, Shadow, Transform,
 };
 
+mod thermal;
+pub use thermal::{fire, plasma};
+
 type Result<T = ()> = std::result::Result<T, InvalidScene>;
 type Box4 = [f64; 4];
 
@@ -320,86 +323,14 @@ pub fn glow_path(c: &mut Canvas, tube: &Path, rgb: u32, radius: f64, intensity: 
     }
     Ok(())
 }
-/// Paint animated flame contours and drifting embers above a horizontal fuel bed.
-///
-/// # Errors
-///
-/// Returns a canvas error for unsupported geometry or display list limits.
-pub fn fire(
-    c: &mut Canvas,
-    bounds: Rect,
-    [left, base]: [f64; 2],
-    width: f64,
-    flame_height: f64,
-    embers: f64,
-    time: f64,
-) -> Result {
-    wash(
-        c,
-        bounds,
-        [left + width * 0.5, base - 3.],
-        width * (114. / 220.),
-        &[(0., tint(0xf55b24, 0.38)), (1., tint(0xa03728, 0.))],
-    )?;
-    // Nested isotherms share a moving fuel field. Warping each contour by
-    // altitude bends the tongues sideways while their roots stay attached.
-    let mut plume = Vec::with_capacity(129);
-    for j in 0..=128 {
-        let u = f64::from(j) / 128.;
-        let x = left + width * u;
-        let wind = (x * 0.092 - time * 1.8).sin();
-        let swirl = x * 0.36 + 1.5 * wind + time * 1.9;
-        let noise = 0.52
-            + 0.30 * swirl.sin()
-            + 0.16 * (swirl * 1.94 - time * 3.3).sin()
-            + 0.10 * (x * 0.91 + time * 4.2).sin();
-        let envelope = (PI * u).sin().max(0.).powf(0.24);
-        plume.push((
-            x,
-            flame_height * (0.16 + noise.clamp(0., 1.).powf(1.4) * 0.85) * envelope,
-            wind,
-        ));
-    }
-    for band in 0..24 {
-        let heat = f64::from(band) / 23.;
-        let altitude = (1. - heat * 0.94).powf(1.45);
-        let mut path = Path::builder().move_to(left, base);
-        for &(x, height, wind) in &plume {
-            let rise = height * altitude;
-            let sway = rise * (0.13 * (rise * 0.15 - time * 2.1 + x * 0.09).sin() + 0.08 * wind);
-            path = path.line_to(x + sway, base - rise);
-        }
-        let red = 174. + 81. * (heat / 0.42).min(1.);
-        let green = 35. + 220. * heat.powf(0.90);
-        let blue = 25. + 195. * heat.powi(3);
-        let rgb = ((red as u32) << 16) | ((green as u32) << 8) | (blue as u32);
-        c.fill(
-            path.line_to(left + width, base + 2.)
-                .line_to(left, base + 2.)
-                .close()
-                .build()?,
-            Brush::Solid(tint(rgb, 0.10 + 0.69 * heat)),
-        )?;
-    }
-    for i in 0..22 {
-        let j = f64::from(i);
-        let t = (time * (0.32 + (j * 0.76).sin() * 0.12) + j * 0.618).rem_euclid(1.);
-        let px = left + width * ((5. + j * 9.8) / 220.) + (t * 5. + j).sin() * 3.;
-        let py = base - 5. - t * flame_height * (0.8 + 0.6 * (j * 2.3).sin().abs());
-        let r = 0.35 + 0.42 * (1. - t);
-        c.fill(
-            rounded([px, py, r * 1.4, r * 2.7], r * 0.7)?,
-            Brush::Solid(tint(0xffd38a, embers * (1. - t))),
-        )?;
-    }
-
-    Ok(())
-}
-fn clipped(c: &mut Canvas, path: Path, paint: impl FnOnce(&mut Canvas) -> Result) -> Result {
+fn saved(c: &mut Canvas, paint: impl FnOnce(&mut Canvas) -> Result) -> Result {
     c.push(Command::Save)?;
-    let result = c.push(Command::Clip(path)).and_then(paint);
+    let result = paint(c);
     let restore = c.push(Command::Restore).map(|_| ());
     result.and(restore)
+}
+fn clipped(c: &mut Canvas, path: Path, paint: impl FnOnce(&mut Canvas) -> Result) -> Result {
+    saved(c, |c| c.push(Command::Clip(path)).and_then(paint))
 }
 fn magnify(
     c: &mut Canvas,

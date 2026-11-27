@@ -157,8 +157,15 @@ impl Stage<'_> {
                 vector::glow_path(c, &lettering()?, rgb, radius, intensity)
             }
             4 => {
-                let [height, speed, embers] = self.knobs;
-                vector::fire(c, bounds, [34., 107.], 220., height, embers, now * speed)?;
+                let [height, _, embers] = self.knobs;
+                vector::fire(c, bounds, [17., 99.], 143., height, embers, now)?;
+                vector::plasma(
+                    c,
+                    RoundedBox::new([181., 69., 88., 25.], 12.5),
+                    3.1,
+                    1.,
+                    now,
+                )?;
                 paint(c)
             }
             5 => {

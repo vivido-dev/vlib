@@ -147,15 +147,22 @@ def draw(
         )
         fx.glow_path(c, lettering(), rgb, radius=radius, intensity=power * level)
     elif index == 4:
-        height, speed, embers = knobs
+        height, _, embers = knobs
         fx.fire(
             c,
             scene.bounds,
-            (34, 107),
-            width=220,
+            (17, 99),
+            width=143,
             height=height,
             embers=embers,
-            time=now * speed,
+            time=now,
+        )
+        fx.plasma(
+            c,
+            fx.RoundedBox((181, 69, 88, 25), 12.5),
+            width=3.1,
+            intensity=1.0,
+            time=now,
         )
         paint(c)
     elif index == 5:

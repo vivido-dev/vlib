@@ -23,6 +23,7 @@ class Lab {
   start = 1;
   target = 1;
   changed = 0;
+  fireTimeOffset = 0;
   hovered = false;
   select(i: number): void {
     this.selected = i;
@@ -146,7 +147,7 @@ async function render(s: Lab, f: Frame): Promise<void> {
     s.position,
     knobs,
     s.level(now),
-    now,
+    s.selected === 4 ? now * knobs[1] + s.fireTimeOffset : now,
     wave,
     s.shots,
     s.scenes[s.selected]!,
@@ -173,6 +174,8 @@ async function render(s: Lab, f: Frame): Promise<void> {
       onClick: () => {
         const indices = s.indices[s.selected]!;
         indices[i] = (indices[i]! + 1) % k.values.length;
+        if (s.selected === 4 && i === 1)
+          s.fireTimeOffset += f.ui.elapsed() * (v - s.value(i));
         f.notify();
       },
     });

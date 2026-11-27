@@ -30,7 +30,7 @@
 mod passes;
 pub use passes::{
     Glass, Pulse, RoundedBox, Scene, charge, electric_border, fire, flashlight, glow, glow_path,
-    god_rays, lamp, liquid_glass, ping, pulse, radar, ripple, zap,
+    god_rays, lamp, liquid_glass, ping, plasma, pulse, radar, ripple, zap,
 };
 use std::f64::consts::PI;
 pub use vivid_protocol::vector::{Brush, Canvas, InvalidScene, Path, Rect};

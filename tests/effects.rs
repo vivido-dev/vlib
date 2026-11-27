@@ -227,6 +227,45 @@ fn dispersion_does_not_reveal_rgb_from_transparent_artwork() {
     }
 }
 
+#[test]
+fn flames_and_plasma_share_a_bounded_replayable_vector_frame() {
+    use vlib::vui::effects::vector::{self, Canvas, Rect, RoundedBox};
+    let frame = |time, embers, radius| {
+        let mut c = Canvas::new();
+        vector::fire(
+            &mut c,
+            Rect::new(400., 20., 400., 140.).unwrap(),
+            [417., 119.],
+            143.,
+            75.,
+            embers,
+            time,
+        )
+        .unwrap();
+        vector::plasma(
+            &mut c,
+            RoundedBox::new([590., 89., 88., 25.], radius),
+            3.1,
+            1.,
+            time,
+        )
+        .unwrap();
+        c.encode().unwrap()
+    };
+    let active = frame(0.6, 1., 12.5);
+    assert!(
+        active.len() + 12 < 256 * 1024,
+        "must fit one native overlay record"
+    );
+    assert_eq!(active, frame(0.6, 1., 12.5));
+    assert_ne!(active, frame(0.75, 1., 12.5));
+    assert_ne!(active, frame(0.6, 0., 12.5));
+    assert_ne!(active, frame(0.6, 1., 0.));
+    let mut c = Canvas::new();
+    vector::plasma(&mut c, RoundedBox::new([0., 0., 30., 30.], 15.), 2., 0., 0.).unwrap();
+    assert!(c.commands().is_empty());
+}
+
 /// A second application can replay arbitrary vector content through a lens at any origin.
 #[test]
 fn vector_glass_replays_custom_artwork_and_releases_its_clip() {
@@ -410,6 +449,34 @@ mod ui {
         ui.advance(Duration::from_millis(500)).unwrap();
         assert!(!charge(&ui));
         assert_eq!(ui.read(|s| s.shots.len()), 0);
+    }
+
+    #[test]
+    fn thermal_speed_changes_preserve_phase_and_zero_sleeps() {
+        let mut ui = TestUi::start(Lab::new().unwrap(), 760., 510.).unwrap();
+        ui.click("scene-4").unwrap();
+        ui.advance(Duration::from_millis(160)).unwrap();
+        // Controls change their labels. The native transforms and strokes identify both effects.
+        let geometry = |ui: &TestUi<Lab>| {
+            ui.canvas()
+                .commands()
+                .iter()
+                .filter(|cmd| matches!(cmd, Command::Transform(_) | Command::Stroke(..)))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let moving = geometry(&ui);
+        for _ in 0..3 {
+            ui.click("knob-1").unwrap();
+            assert_eq!(moving, geometry(&ui));
+        }
+        ui.advance(Duration::from_secs(3)).unwrap();
+        assert_eq!(moving, geometry(&ui));
+        assert!(ui.wake_in().is_none());
+        ui.click("knob-1").unwrap();
+        assert_eq!(moving, geometry(&ui));
+        ui.advance(Duration::from_millis(100)).unwrap();
+        assert_ne!(moving, geometry(&ui));
     }
 
     #[test]

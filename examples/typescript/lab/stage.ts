@@ -138,13 +138,18 @@ export function draw(
       break;
     }
     case 4: {
-      const [height, speed, embers] = knobs;
-      fx.fire(c, scene.bounds, [34, 107], {
-        width: 220,
+      const [height, , embers] = knobs;
+      fx.fire(c, scene.bounds, [17, 99], {
+        width: 143,
         height,
         embers,
-        time: now * speed,
+        time: now,
       });
+      fx.plasma(
+        c,
+        { rect: [181, 69, 88, 25], radius: 12.5 },
+        { width: 3.1, intensity: 1, time: now },
+      );
       paint(c);
       break;
     }

@@ -122,6 +122,8 @@ host drives. What they cannot check is what a pane does with a frame.
 
 Run `node target/examples-typescript/effects_lab.js` in a Vivido pane after building the package and examples. The gallery draws all eight scenes as native vectors at the current display scale. Click Send in Pulse to ping the inbox. Hover Charged or click the stage in Electricity.
 
+The **Fire** tab shows curling flames and a plasma border together. Height and Embers adjust the fire. Speed changes both animations, and zero freezes the current frame. To put plasma around your own control, draw its border before the control’s fill. For example, use `fx.plasma(frame.canvas, { rect: [40, 30, 96, 28], radius: 14 }, { width: 3, intensity: 1, time: frame.elapsed })`.
+
 Import `vectorEffects` from `@vivido/vlib/vui` to use the gallery renderer on your own overlay canvas. Draw lights with `lamp`, `flashlight`, and `godRays` using scene bounds and elevated surfaces in logical units. Use `glow` for panels, `glowPath` for paths, and `fire` for a flame bed. For `liquidGlass`, supply a lens and a paint-only callback that replays the underlying artwork.
 
 The animated passes include `radar`, `pulse`, `ping`, `ripple`, `electricArc`, `electricBorder`, `charge`, and `zap`. Apply the canvas transform and clip for your view, then supply the current phase or elapsed time on each redraw. [Gallery composition](examples/typescript/lab/stage.ts)

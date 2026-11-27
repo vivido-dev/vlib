@@ -331,6 +331,32 @@ def glow_path(
             c.stroke(tube, Brush.solid(_color(color, opacity)), width)
 
 
+def _thermal_color(t: float) -> int:
+    # sRGB emission ramp from dim soot through orange to a yellow-white core.
+    ramp = (
+        (107, 30, 16),
+        (198, 60, 17),
+        (250, 117, 24),
+        (255, 181, 56),
+        (255, 226, 134),
+        (255, 248, 219),
+    )
+    value = max(0.0, min(1.0, t)) * (len(ramp) - 1)
+    i = min(int(value), len(ramp) - 2)
+    f = value - i
+    r, g, b = (round(a + (b - a) * f) for a, b in zip(ramp[i], ramp[i + 1]))
+    return r << 16 | g << 8 | b
+
+
+def _sway(z: float, phase: float, time: float) -> float:
+    # Backtrace a rising parcel through the large drift and smaller curling eddies.
+    age = time - z * 1.15
+    return z * (
+        0.15 * math.sin(phase + 2.1 * age)
+        + 0.085 * math.sin(1.73 * phase - 3.7 * age + 5.3 * z)
+    )
+
+
 def fire(
     c: Canvas,
     bounds: Rect,
@@ -341,66 +367,241 @@ def fire(
     embers: float,
     time: float,
 ) -> None:
-    """Paint animated flame contours and drifting embers above a horizontal fuel bed."""
+    """Draw turbulent, cooling plumes above a fuel bed. Time is in seconds."""
+    if width <= 0 or height <= 0:
+        return
     left, base = origin
-    full = Path.rectangle(bounds)
     c.fill(
-        full,
+        Path.rectangle(bounds),
         _radial(
-            (left + 0.5 * width, base - 3),
-            width * (114 / 220),
-            (0, _color(0xF55B24, 0.38)),
-            (1, _color(0xA03728, 0)),
+            (left + width / 2, base),
+            width * 0.64,
+            (0, _color(0xFF7D29, 0.21)),
+            (0.56, _color(0xE34B1D, 0.06)),
+            (1, _color(0xC33E16, 0)),
         ),
     )
-    # Nested heat contours curl sideways with altitude; their roots stay attached.
-    plume = []
-    for j in range(129):
-        u = j / 128
-        xx = left + width * u
-        wind = math.sin(xx * 0.092 - time * 1.8)
-        swirl = xx * 0.36 + 1.5 * wind + time * 1.9
-        noise = (
-            0.52
-            + 0.30 * math.sin(swirl)
-            + 0.16 * math.sin(swirl * 1.94 - time * 3.3)
-            + 0.10 * math.sin(xx * 0.91 + time * 4.2)
-        )
-        envelope = max(0.0, math.sin(math.pi * u)) ** 0.24
-        plume.append(
-            (
-                xx,
-                height * (0.16 + min(1.0, max(0.0, noise)) ** 1.4 * 0.85) * envelope,
-                wind,
+    unit = Path.rectangle(Rect(-1, -1, 2, 2))
+    # Each cross section has a continuous radial falloff. Shearing its long axis
+    # along the velocity field joins adjacent sections into curling streams.
+    c.save()
+    try:
+        c.clip(
+            Path.rectangle(
+                Rect(left - width * 0.25, base - height * 2, width * 1.5, height * 2)
             )
         )
-    for band in range(24):
-        heat = band / 23
-        altitude = (1 - heat * 0.94) ** 1.45
-        path = Path().move_to(left, base)
-        for xx, extent, wind in plume:
-            rise = extent * altitude
-            sway = rise * (
-                0.13 * math.sin(rise * 0.15 - time * 2.1 + xx * 0.09) + 0.08 * wind
+        layers = (
+            (12, 5, 1.32, 1.30, 0.0, 0.064),
+            (25, 8, 1.02, 1.12, 0.82, 0.68),
+            (32, 7, 0.78, 1.12 * 0.78, 1.02, 0.83),
+        )
+        for layer, (count, slices, altitude, spread, gain, opacity) in enumerate(
+            layers
+        ):
+            for i in range(count):
+                seed = i * 2.399963 + layer * 1.71
+                u = (i + 0.5 + 0.30 * math.sin(seed * 3.7)) / count
+                edge = min(1.0, u * 12, (1 - u) * 12)
+                phase = u * 32 + 0.65 * math.sin(seed) + layer * 0.34
+                for k in range(slices - 1, -1, -1):
+                    z = k / slices
+                    age = time - z * 0.86
+                    fuel = (
+                        0.66
+                        + 0.21
+                        * math.sin(u * 25 + 1.45 * math.sin(u * 9 + age) - 2.1 * age)
+                        + 0.15 * math.sin(u * 53 + age * 3.4)
+                        + 0.08 * math.cos(u * 11 - age)
+                    )
+                    flicker = (
+                        0.94
+                        + 0.15 * math.sin(seed + age * 3.9)
+                        + 0.08 * math.sin(seed * 2.7 - age * 6.7)
+                    )
+                    reach = height * fuel * flicker * (0.35 + 0.65 * edge)
+                    rise = reach * altitude
+                    x = left + width * u + rise * _sway(z, phase, time)
+                    y = base - z * rise
+                    half = (
+                        width
+                        / count
+                        * spread
+                        * (1 - 0.88 * z)
+                        * (0.86 + 0.20 * math.sin(phase + z * 8 - age * 4))
+                    )
+                    pulse = 0.5 + 0.5 * math.sin(
+                        seed + time * 4.5 - z * 10 + 0.6 * math.sin(phase + z * 6)
+                    )
+                    half *= 1.0 - z * 0.58 * (1 - pulse)
+                    length = rise * (0.24 - 0.06 * z)
+                    tilt = (
+                        _sway(z + 0.02, phase, time) - _sway(z - 0.02, phase, time)
+                    ) / 0.04
+                    fade = (1 - z) ** 0.75 * (1 - z * 0.75 * (1 - pulse))
+                    if layer == 0:
+                        rgb = 0x806958
+                    else:
+                        heat = (1 - z) ** 1.35 * gain + 0.085 * math.sin(
+                            seed + z * 12 - age * 3
+                        )
+                        rgb = _thermal_color(heat)
+                    power = opacity * fade
+                    brush = _radial(
+                        (0, 0),
+                        1,
+                        (0, _color(rgb, power)),
+                        (0.35, _color(rgb, power * 0.87)),
+                        (0.70, _color(rgb, power * 0.34)),
+                        (1, _color(rgb, 0)),
+                    )
+                    c.save()
+                    try:
+                        c.transform(half, 0, length * tilt, -length, x, y)
+                        c.fill(unit, brush)
+                    finally:
+                        c.restore()
+    finally:
+        c.restore()
+    if embers <= 0:
+        return
+    for i in range(22):
+        seed = i * 2.399963
+        age = (time * (0.36 + 0.12 * math.sin(seed)) + i * 0.618034) % 1
+        u = (i + 0.5) / 22
+        drift = math.sin(age * 5 + seed) - math.sin(seed)
+        x = left + width * u + height * 0.09 * age * drift
+        y = base - height * age * (0.8 + 0.44 * abs(math.sin(seed)))
+        alpha = (
+            embers
+            * min(1.0, age * 12, (1 - age) * 4)
+            * (0.65 + 0.35 * math.sin(seed) ** 2)
+        )
+        radius = min(width, height) * (0.004 + 0.006 * (1 - age))
+        c.fill(
+            Path.rectangle(
+                Rect(x - 3 * radius, y - 3 * radius, 6 * radius, 6 * radius)
+            ),
+            _radial(
+                (x, y),
+                3 * radius,
+                (0, _color(0xFF9440, alpha * 0.35)),
+                (1, _color(0xFF7125, 0)),
+            ),
+        )
+        spark = Rect(x - radius, y - 2 * radius, 2 * radius, 4 * radius)
+        c.fill(
+            Path.ellipse(spark),
+            _vertical(
+                y - 2 * radius,
+                4 * radius,
+                (0, _color(0xFFEB96, alpha)),
+                (1, _color(0xFF6027, alpha * 0.15)),
+            ),
+        )
+
+
+def _rim_sample(
+    shape: RoundedBox, guide: float, u: float
+) -> Tuple[float, float, float, float]:
+    x, y, w, h = shape.rect
+    r = min(max(0.0, shape.radius), w / 2, h / 2)
+    radius = r + guide
+    arc = radius * math.pi / 2
+    distance = u * (2 * (w + h - 4 * r) + 4 * arc)
+    # Each tangent ends at a quarter circle. Its outward normal is continuous
+    # across both joins, including the seam between the last and first side.
+    for side, (tx, ty) in enumerate(((1, 0), (0, 1), (-1, 0), (0, -1))):
+        length = (w if side % 2 == 0 else h) - 2 * r
+        cx = x + w - r if side in (0, 1) else x + r
+        cy = y + r if side in (0, 3) else y + h - r
+        if distance <= length:
+            return (
+                cx + radius * ty - (length - distance) * tx,
+                cy - radius * tx - (length - distance) * ty,
+                ty,
+                -tx,
             )
-            path.line_to(xx + sway, base - rise)
-        red = int(174 + 81 * min(1.0, heat / 0.42))
-        green = int(35 + 220 * heat**0.90)
-        blue = int(25 + 195 * heat**3)
-        color = red << 16 | green << 8 | blue
-        c.fill(
-            path.line_to(left + width, base + 2).line_to(left, base + 2).close(),
-            Brush.solid(_color(color, 0.10 + 0.69 * heat)),
+        distance -= length
+        if distance <= arc or side == 3:
+            a = distance / radius
+            nx = ty * math.cos(a) + tx * math.sin(a)
+            ny = -tx * math.cos(a) + ty * math.sin(a)
+            return cx + radius * nx, cy + radius * ny, nx, ny
+        distance -= arc
+    raise AssertionError("unreachable")
+
+
+def plasma(
+    c: Canvas, shape: RoundedBox, *, width: float, intensity: float, time: float
+) -> None:
+    """Draw a flowing violet and cyan plasma border. Width is in logical units."""
+    x, y, w, h = shape.rect
+    if min(w, h, width, intensity) <= 0:
+        return
+    r = min(max(shape.radius, 0.0), w / 2, h / 2)
+    guide = width * 0.58
+    rim = _rounded((x - guide, y - guide, w + 2 * guide, h + 2 * guide), r + guide)
+    for spread, opacity in (
+        (3.2, 0.035),
+        (2.5, 0.055),
+        (1.9, 0.08),
+        (1.4, 0.11),
+        (0.95, 0.14),
+    ):
+        c.stroke(
+            rim, Brush.solid(_color(0x7563EC, opacity * intensity)), width * spread
         )
-    for j in range(22):
-        t = (time * (0.32 + math.sin(j * 0.76) * 0.12) + j * 0.618) % 1
-        px = left + width * ((5 + j * 9.8) / 220) + math.sin(t * 5 + j) * 3
-        py = base - 5 - t * height * (0.8 + 0.6 * abs(math.sin(j * 2.3)))
-        r = 0.35 + 0.42 * (1 - t)
-        c.fill(
-            _rounded((px, py, r * 1.4, r * 2.7), r * 0.7),
-            Brush.solid(_color(0xFFD38A, embers * (1 - t))),
+    count = 128
+    samples = [_rim_sample(shape, guide, k / count) for k in range(count)]
+    for j in range(6):
+        phase = j * 2.399963
+        points = []
+        for k, (px, py, nx, ny) in enumerate(samples):
+            a = math.tau * k / count
+            offset = width * (
+                0.31
+                * math.sin(3 * a + phase + time * 1.5 + 0.8 * math.sin(2 * a - time))
+                + 0.19
+                * math.sin(
+                    7 * a - 2.4 * time + phase * 2 + 0.8 * math.cos(3 * a + time)
+                )
+            )
+            points.append((px + nx * offset, py + ny * offset))
+        p, q = points[-1], points[0]
+        path = Path().move_to((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
+        for k, p in enumerate(points):
+            q = points[(k + 1) % count]
+            path.quad_to(*p, (p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
+        path.close()
+        c.stroke(path, Brush.solid(_color(0x8473FF, intensity * 0.19)), width * 0.41)
+        c.stroke(
+            path,
+            Brush.solid(_color(0x9FC4FF if j % 2 else 0x9C8BFF, intensity * 0.48)),
+            width * 0.12,
         )
+        # Bright crests travel continuously along the same filament. Their
+        # tapered ends merge back into the dimmer, unbroken strand.
+        for crest in range(2):
+            start = (time * (0.067 + 0.006 * j) + j * 0.381966 + crest * 0.5) % 1
+            upper, lower = [], []
+            for step in range(17):
+                pos = (start + step * 0.007) * count
+                k = math.floor(pos)
+                f = pos - k
+                p, q = points[k % count], points[(k + 1) % count]
+                px, py = p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f
+                # Interpolate the guide normals as well, so a crest can cross a corner.
+                a0, a1 = samples[k % count], samples[(k + 1) % count]
+                nx = a0[2] + (a1[2] - a0[2]) * f
+                ny = a0[3] + (a1[3] - a0[3]) * f
+                half = width * 0.125 * math.sin(math.pi * step / 16) ** 2
+                upper.append((px + nx * half, py + ny * half))
+                lower.append((px - nx * half, py - ny * half))
+            crest_path = Path().move_to(*upper[0])
+            for vertex in upper[1:] + lower[-2:0:-1]:
+                crest_path.line_to(*vertex)
+            c.fill(crest_path.close(), Brush.solid(_color(0xCBF1FF, 0.88 * intensity)))
 
 
 def _magnify(c: Canvas, paint: Paint, clip: Path, p: XY, scale: float) -> None:

@@ -30,6 +30,7 @@ class Lab:
         self.position: XY = (0, 0)
         self.grab: Optional[XY] = None
         self.wave: Optional[Tuple[XY, float]] = None
+        self.fire_time_offset = 0.0
         self.select(0)
 
     def select(self, index: int) -> None:
@@ -151,7 +152,7 @@ def make_ui() -> Ui:
             s.position,
             knobs,
             s.level(now),
-            now,
+            now * knobs[1] + s.fire_time_offset if s.selected == 4 else now,
             wave,
             s.shots,
             s.scenes[s.selected],
@@ -175,10 +176,13 @@ def make_ui() -> Ui:
             width = 18 + len(label) * 7.0
 
             def cycle(_: Any, index: int = i) -> None:
+                old = s.value(index)
                 indices = s.indices[s.selected]
                 indices[index] = (indices[index] + 1) % len(
                     page["controls"][index]["values"]
                 )
+                if s.selected == 4 and index == 1:
+                    s.fire_time_offset += f.ui.elapsed() * (old - s.value(index))
                 f.notify()
 
             f.button(
