@@ -22,7 +22,7 @@ if (!existsSync(resolve(BUILT, "hello_world.js"))) {
 const load = (name) => import(pathToFileURL(resolve(BUILT, `${name}.js`)).href);
 const {
   Easing, ListState, Running, Spring, SpringState, TextField, Ui,
-  fitRect, gradientBrush, inset, Keys, Mods,
+  fitRect, gradientBrush, inset, Keys, Mods, rect,
 } = await import("@vivido/vlib/vui");
 
 // Synthetic events: a raw handle whose `targets` is always the window under test.
@@ -382,7 +382,7 @@ test("every example hands the launch guard its own module", async () => {
   // against `ui.ts` and would never run. Every example has to pass its own.
   const { readdirSync, readFileSync } = await import("node:fs");
   const sources = readdirSync("examples/typescript").filter((file) => file.endsWith(".ts"));
-  assert.equal(sources.length, 32);
+  assert.equal(sources.length, 33);
   for (const file of sources) {
     const text = readFileSync(resolve("examples/typescript", file), "utf8");
     assert.match(
@@ -401,7 +401,7 @@ test("every example builds a frame the protocol accepts", async () => {
     .filter((file) => file.endsWith(".js"))
     .map((file) => file.slice(0, -3))
     .sort();
-  assert.equal(names.length, 32);
+  assert.equal(names.length, 33);
 
   const session = await OverlaySession.connect({ offline: true });
   for (const name of names) {
@@ -412,5 +412,30 @@ test("every example builds a frame the protocol accepts", async () => {
     });
     await ui.attach(session, window);
     await ui.paint();
+  }
+});
+
+test("the effect gallery maps clicks into its resized canvas", async () => {
+  const { ui, session } = await started("effects_lab");
+  try {
+    await ui.dispatch({ kind: "geometry", bounds: rect(0, 0, 460, 322), settled: true, ...raw });
+    await ui.paint();
+    const stage = ui.boundsOf("stage");
+    assert.equal(stage.width, 2 * stage.height);
+    for (let i = 0; i < 6; i++) {
+      const tab = ui.regionId(`scene-${i}`);
+      await ui.dispatch(pointer(tab, 0, 0, 0, true, 1));
+      await ui.dispatch(pointer(tab, 0, 0, 0, false));
+      await ui.paint();
+      assert.equal(ui.read(s => s.selected), i);
+    }
+    const target = ui.regionId("stage");
+    await ui.dispatch(pointer(target, stage.x + 5, stage.y + 5, 0, true, 1));
+    assert.equal(ui.read(s => s.wave), undefined);
+    await ui.dispatch(pointer(target, stage.x + 5, stage.y + 5, 0, false));
+    await ui.paint();
+    assert.ok(ui.read(s => s.wave));
+  } finally {
+    await session.close();
   }
 });

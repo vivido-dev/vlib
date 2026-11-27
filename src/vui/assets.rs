@@ -366,6 +366,7 @@ pub(crate) struct Assets {
     decoded: HashMap<DecodedKey, Decoded>,
     /// Uploads, by the key and frame index they hold.
     uploaded: HashMap<UploadKey, Held>,
+    effects: HashMap<u64, (crate::vui::effects::EffectSpec, Held)>,
     bytes: usize,
     /// Rises once per painted frame, which is what "least recently drawn" is measured in.
     clock: u64,
@@ -446,7 +447,7 @@ impl Assets {
         };
 
         // Make room before asking, so the host is never the one to refuse.
-        self.evict_for(overlay, rgba.len());
+        self.evict_for(overlay, rgba.len())?;
         let image = overlay.upload_rgba(width, height, &rgba)?;
         let id = image.id();
         self.bytes = self.bytes.saturating_add(rgba.len());
@@ -465,26 +466,95 @@ impl Assets {
     ///
     /// The ceilings are the protocol's: a producer that ignored them would have the host refuse
     /// its next upload instead, which is the same outcome arrived at less gracefully.
-    fn evict_for(&mut self, overlay: &OverlayWindow, bytes: usize) {
-        while !self.uploaded.is_empty()
-            && (self.uploaded.len() >= MAX_RETAINED_ASSETS
-                || self.bytes.saturating_add(bytes) > MAX_RETAINED_ASSET_BYTES)
+    fn evict_for(&mut self, overlay: &OverlayWindow, bytes: usize) -> io::Result<()> {
+        while self.uploaded.len() + self.effects.len() >= MAX_RETAINED_ASSETS
+            || self.bytes.saturating_add(bytes) > MAX_RETAINED_ASSET_BYTES
         {
-            let Some(oldest) = self
+            if let Some(key) = self
                 .uploaded
                 .iter()
-                .min_by_key(|(_, held)| held.used)
+                .filter(|(_, h)| h.used != self.clock)
+                .min_by_key(|(_, h)| h.used)
                 .map(|(key, _)| key.clone())
-            else {
-                break;
-            };
-            if let Some(held) = self.uploaded.remove(&oldest) {
-                self.bytes = self.bytes.saturating_sub(held.bytes);
-                // A host that has already forgotten it is not an error: what matters is that we
-                // stop counting it.
-                let _ = overlay.release_image(&held.image);
+            {
+                let held = &self.uploaded[&key];
+                overlay.release_image(&held.image)?;
+                self.bytes -= held.bytes;
+                self.uploaded.remove(&key);
+            } else if let Some(id) = self
+                .effects
+                .iter()
+                .filter(|(_, (_, h))| h.used != self.clock)
+                .min_by_key(|(_, (_, h))| h.used)
+                .map(|(&id, _)| id)
+            {
+                self.release_effect(overlay, id)?;
+            } else {
+                return Err(invalid_message(
+                    "visible images exceed the retained image budget",
+                ));
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn effect(
+        &mut self,
+        overlay: &OverlayWindow,
+        id: u64,
+        spec: &crate::vui::effects::EffectSpec,
+    ) -> io::Result<u64> {
+        if let Some((old, held)) = self.effects.get_mut(&id)
+            && std::rc::Rc::ptr_eq(&old.scene, &spec.scene)
+            && old.effect == spec.effect
+        {
+            held.used = self.clock;
+            return Ok(held.image.id());
+        }
+        let rgba = spec.scene.render(spec.effect)?;
+        self.evict_for(overlay, rgba.len())?;
+        let [w, h] = spec.scene.raster();
+        let image = overlay.upload_rgba(w as u32, h as u32, &rgba)?;
+        if let Err(err) = self.release_effect(overlay, id) {
+            let _ = overlay.release_image(&image);
+            return Err(err);
+        }
+        let asset = image.id();
+        self.bytes += rgba.len();
+        self.effects.insert(
+            id,
+            (
+                spec.clone(),
+                Held {
+                    image,
+                    bytes: rgba.len(),
+                    used: self.clock,
+                },
+            ),
+        );
+        Ok(asset)
+    }
+
+    fn release_effect(&mut self, overlay: &OverlayWindow, id: u64) -> io::Result<()> {
+        if let Some((_, held)) = self.effects.get(&id) {
+            overlay.release_image(&held.image)?;
+            self.bytes -= held.bytes;
+            self.effects.remove(&id);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish_effects(&mut self, overlay: &OverlayWindow) -> io::Result<()> {
+        let unused: Vec<_> = self
+            .effects
+            .iter()
+            .filter(|(_, (_, h))| h.used != self.clock)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in unused {
+            self.release_effect(overlay, id)?;
+        }
+        Ok(())
     }
 
     /// Decode every raster source a frame is about to draw, so layout knows how big they are.
@@ -522,12 +592,15 @@ impl Assets {
     /// How many uploads the host is holding for this window.
     #[cfg_attr(not(feature = "testing"), allow(dead_code))]
     pub(crate) fn retained(&self) -> usize {
-        self.uploaded.len()
+        self.uploaded.len() + self.effects.len()
     }
 
     /// Let go of everything, which a window does when it closes.
     pub(crate) fn clear(&mut self, overlay: &OverlayWindow) {
         for (_, held) in self.uploaded.drain() {
+            let _ = overlay.release_image(&held.image);
+        }
+        for (_, (_, held)) in self.effects.drain() {
             let _ = overlay.release_image(&held.image);
         }
         self.decoded.clear();

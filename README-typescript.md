@@ -117,3 +117,9 @@ npm run typecheck && npm run typecheck:examples
 
 The tests drive the contracts above against offline sessions, which is the same code path a live
 host drives. What they cannot check is what a pane does with a frame.
+
+## Effects canvas
+
+Run `node target/examples-typescript/effects_lab.js` in a Vivido pane after building the package and examples. The gallery shares six scenes with Rust. Prepare an `EffectScene` from logical dimensions, raster dimensions, background color, and surfaces. An optional RGBA backdrop supplies the pixels for glass to refract. Emissive surfaces and an optional alpha mask feed glow and fire.
+
+Draw with `await frame.effectCanvas(name, bounds, scene, effect)`. Keep the scene and canvas name stable across frames so unchanged artwork can reuse its upload. [Gallery source](examples/typescript/effects_lab.ts)

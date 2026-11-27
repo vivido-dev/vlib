@@ -270,24 +270,21 @@ impl LayoutStyle {
             flex_grow: self.flex_grow,
             flex_shrink: self.flex_shrink,
             flex_basis: self.flex_basis.basis(),
-            // Stretch is expressed as a keyword rather than left to taffy's `None`: the two
-            // mean the same thing to the engine, and saying it makes the style in a frame
-            // readable.
-            align_items: Some(match self.align_items {
+            align_items: match self.align_items {
                 Align::Start => AlignItems::START,
                 Align::Center => AlignItems::CENTER,
                 Align::End => AlignItems::END,
                 Align::Stretch => AlignItems::STRETCH,
                 Align::Baseline => AlignItems::BASELINE,
-            }),
-            justify_content: Some(match self.justify_content {
+            },
+            justify_content: match self.justify_content {
                 Justify::Start => AlignContent::START,
                 Justify::Center => AlignContent::CENTER,
                 Justify::End => AlignContent::END,
                 Justify::SpaceBetween => AlignContent::SPACE_BETWEEN,
                 Justify::SpaceAround => AlignContent::SPACE_AROUND,
                 Justify::SpaceEvenly => AlignContent::SPACE_EVENLY,
-            }),
+            },
             overflow: match self.overflow {
                 // `Clip` differs from `Hidden` only in whether the box is scrollable; nothing
                 // here scrolls by itself, so both mean the same thing to the engine.
@@ -302,7 +299,7 @@ impl LayoutStyle {
             },
             grid_template_columns: Track::components(&self.grid_columns),
             grid_template_rows: Track::components(&self.grid_rows),
-            align_content: Some(AlignContent::START),
+            align_content: AlignContent::START,
             ..Default::default()
         }
     }

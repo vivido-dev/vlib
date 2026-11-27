@@ -24,6 +24,8 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple, cast
 
+from .effects import Effect, EffectScene
+
 from vivid_sdk import OverlaySession, OverlayWindowOptions
 from vivid_sdk.overlay import (
     AccessibilityEvent,
@@ -462,6 +464,7 @@ class Frame:
     focus_order: List[str] = field(default_factory=list)
     semantics: List[SemanticNode] = field(default_factory=list)
     caret: Optional[Rect] = None
+    _effect_names: set[str] = field(default_factory=set)
 
     # -- identity --------------------------------------------------------------
 
@@ -761,6 +764,28 @@ class Frame:
             self.ui._uploads[name] = image
         return image
 
+    def effect_canvas(self, name: str, bounds: Rect, scene: EffectScene, effect: Effect) -> None:
+        """Draw a prepared scene and reuse its upload until the parameters change."""
+        if bounds.width <= 0 or bounds.height <= 0:
+            return
+        if name in self._effect_names:
+            raise ValueError("duplicate effect canvas name in frame")
+        self._effect_names.add(name)
+        cache = self.ui._effects
+        old = cache.get(name)
+        if old is not None and old[0] is scene and old[1] == effect:
+            image = old[2]
+        else:
+            image = self.ui._window.upload_rgba(*scene.raster, scene.render(effect))
+            if old is not None:
+                try:
+                    self.ui._window.release_image(old[2])
+                except Exception:
+                    self.ui._window.release_image(image)
+                    raise
+            cache[name] = (scene, effect, image)
+        self.image(image, bounds)
+
     def image(self, image: RetainedImage, bounds: Rect, *, opacity: float = 1.0) -> None:
         self.ui._window.draw_image(self.canvas, image, bounds, opacity)
 
@@ -834,6 +859,7 @@ class Ui:
         self._measures: Dict[Tuple[Any, ...], TextMeasurement] = {}
         # A None means the host refused to shape this one; it is drawn plainly.
         self._layouts: Dict[str, Optional[RetainedTextLayout]] = {}
+        self._effects: Dict[str, Tuple[EffectScene, Effect, RetainedImage]] = {}
         self._uploads: Dict[str, RetainedImage] = {}
         self._quit = False
 
@@ -881,6 +907,11 @@ class Ui:
 
     def attach(self, session: OverlaySession, window: Any) -> None:
         """Connect to a session the caller owns — which is how a test drives the loop."""
+        if self._window is not window:
+            for _, _, image in self._effects.values():
+                with suppress(Exception):
+                    self._window.release_image(image)
+            self._effects.clear()
         self._session = session
         self._window = window
         self._t0 = time.monotonic()
@@ -1036,6 +1067,9 @@ class Ui:
                         self._window.set_editor_geometry(receipt.revision, frame.caret)
         else:
             self._window.present(canvas)
+        for name in self._effects.keys() - frame._effect_names:
+            self._window.release_image(self._effects[name][2])
+            del self._effects[name]
         self._prev = frame.regions
         self._focus_order = list(frame.focus_order)
         self._last_paint = now

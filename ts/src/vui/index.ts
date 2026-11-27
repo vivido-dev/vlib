@@ -20,6 +20,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { overlay, OverlaySession } from "@vivido/vivid-sdk";
 
+import type { Effect, EffectScene } from "./effects.js";
+export { EffectScene, type Effect, type Light, type Wave, type Surface } from "./effects.js";
+
 const { Brush, Canvas, Path } = overlay;
 
 /** The SDK's own overlay vocabulary, re-exported unchanged.
@@ -358,6 +361,7 @@ export interface LabelOptions {
  *  table, which is the frame the host hit-tested against and the only one whose geometry
  *  an event could be referring to. */
 export class Frame {
+  readonly effectNames = new Set<string>();
   readonly regions = new Map<bigint, Region>();
   readonly focusOrder: string[] = [];
   semantics: readonly SemanticNode[] = [];
@@ -621,6 +625,27 @@ export class Frame {
     return image;
   }
 
+  /** Draw a producer-rendered effect, replacing its immutable upload when it changes. */
+  async effectCanvas(name: string, bounds: Rect, scene: EffectScene, effect: Effect): Promise<void> {
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    if (this.effectNames.has(name)) throw new Error("duplicate effect canvas name in frame");
+    this.effectNames.add(name);
+    const key = JSON.stringify(effect);
+    const old = this.ui.effects.get(name);
+    let image: RetainedImage;
+    if (old && old.scene === scene && old.key === key) {
+      image = old.image;
+    } else {
+      image = await this.ui.window.uploadRgba(scene.width, scene.height, scene.render(effect));
+      if (old) {
+        try { await this.ui.window.releaseImage(old.image); }
+        catch (error) { await this.ui.window.releaseImage(image); throw error; }
+      }
+      this.ui.effects.set(name, { scene, key, image });
+    }
+    await this.image(image, bounds);
+  }
+
   async image(image: RetainedImage, bounds: Rect, opacity = 1): Promise<void> {
     await this.ui.window.drawImage(this.canvas, image, bounds, opacity);
   }
@@ -679,6 +704,7 @@ export class Ui<S> {
   readonly measures = new Map<string, TextMeasurement>();
   // An undefined means the host refused to shape this one; it is drawn plainly.
   readonly layouts = new Map<string, RetainedTextLayout | undefined>();
+  readonly effects = new Map<string, { scene: EffectScene; key: string; image: RetainedImage }>();
   readonly uploads = new Map<string, RetainedImage>();
 
   constructor(
@@ -754,6 +780,10 @@ export class Ui<S> {
   /** Connect to a session the caller owns and paint the first frame. The caller then
    *  drives `dispatch` and `paint` — which is how a test runs the loop. */
   async attach(session: OverlaySession, window: OverlayWindow): Promise<void> {
+    if (this._window !== window) {
+      for (const { image } of this.effects.values()) await this._window?.releaseImage(image).catch(() => undefined);
+      this.effects.clear();
+    }
     this.session = session;
     this._window = window;
     this.t0 = now();
@@ -904,6 +934,12 @@ export class Ui<S> {
       }
     } else {
       await window.present(canvas);
+    }
+    for (const [name, held] of this.effects) {
+      if (!frame.effectNames.has(name)) {
+        await window.releaseImage(held.image);
+        this.effects.delete(name);
+      }
     }
     this.prev = frame.regions;
     this.focusList = [...frame.focusOrder];

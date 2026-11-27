@@ -47,6 +47,7 @@ pub mod animation;
 mod app;
 mod assets;
 pub mod canvas;
+pub mod effects;
 mod element;
 mod focus;
 mod geometry;

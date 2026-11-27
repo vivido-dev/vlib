@@ -190,6 +190,7 @@ impl TextSpec {
 pub(crate) enum NodeKind {
     /// A box: its background, border, and shadows, with children painted inside it.
     Container,
+    Effect(crate::vui::effects::EffectSpec),
     /// A run of text, positioned at the node's origin.
     Text(TextSpec),
     /// A text field: the paragraph, and the caret and selection drawn over it.
@@ -310,9 +311,11 @@ impl Node {
             NodeKind::Input(spec) => Some(spec.drawn()),
             // A canvas draws paths, not glyphs, so there is nothing here to measure: it is sized
             // by its box and not by its content.
-            NodeKind::Container | NodeKind::List(_) | NodeKind::Image(_) | NodeKind::Canvas(_) => {
-                None
-            }
+            NodeKind::Effect(_)
+            | NodeKind::Container
+            | NodeKind::List(_)
+            | NodeKind::Image(_)
+            | NodeKind::Canvas(_) => None,
         }
     }
 

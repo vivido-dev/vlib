@@ -105,3 +105,9 @@ uv run --extra test mypy --platform linux
 
 The tests drive the contracts above against dry-run sessions, which is the same code path a live
 host drives. What they cannot check is what a pane does with a frame.
+
+## Effects canvas
+
+Run `python examples/python/effects_lab.py` in a Vivido pane. The gallery shares six scenes with Rust. Prepare an `EffectScene` from logical dimensions, raster dimensions, background color, and surfaces. An optional RGBA backdrop supplies the pixels for glass to refract. Emissive surfaces and an optional alpha mask feed glow and fire.
+
+Draw with `Frame.effect_canvas(name, bounds, scene, effect)`. Keep the scene and canvas name stable across frames so unchanged artwork can reuse its upload. [Gallery source](examples/python/effects_lab.py)

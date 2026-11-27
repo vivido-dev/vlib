@@ -53,7 +53,7 @@ impl<E: IntoElement> IntoElement for Vec<E> {
 /// A box: the element almost everything is made of.
 #[derive(Debug)]
 pub struct Div {
-    node: Node,
+    pub(crate) node: Node,
 }
 
 /// A run of text.

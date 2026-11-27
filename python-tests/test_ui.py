@@ -542,7 +542,7 @@ def test_every_example_builds_a_frame_the_protocol_accepts() -> None:
         for path in (FilePath(__file__).resolve().parent.parent / "examples" / "python").glob("*.py")
         if not path.stem.startswith("_")
     )
-    assert len(names) == 32, names
+    assert len(names) == 33, names
     with OverlaySession.connect(dry_run=True) as session:
         for name in names:
             ui = importlib.import_module(name).make_ui()
@@ -551,3 +551,28 @@ def test_every_example_builds_a_frame_the_protocol_accepts() -> None:
             )
             ui.attach(session, window)
             ui.paint()
+
+
+def test_effects_lab_gestures_after_resize() -> None:
+    from vivid_sdk.overlay import GeometryEvent
+    ui, _, session = _started("effects_lab")
+    try:
+        ui.dispatch(GeometryEvent(0, _Raw(), Rect(0, 0, 460, 322), True))
+        ui.paint()
+        stage = ui.bounds_of("stage")
+        assert stage is not None and stage.width == 2 * stage.height
+        for i in range(6):
+            tab = ui.region_id(f"scene-{i}")
+            ui.dispatch(pointer(tab, button=0, down=True, clicks=1))
+            ui.dispatch(pointer(tab, button=0, down=False))
+            ui.paint()
+            assert ui.read(lambda state: state.selected) == i
+        x, y = stage.x + 5, stage.y + 5
+        target = ui.region_id("stage")
+        ui.dispatch(pointer(target, x, y, 0, True, 1))
+        assert ui.read(lambda state: state.wave) is None
+        ui.dispatch(pointer(target, x, y, 0, False))
+        ui.paint()
+        assert ui.read(lambda state: state.wave) is not None
+    finally:
+        session.close()

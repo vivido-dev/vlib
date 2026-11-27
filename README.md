@@ -77,6 +77,7 @@ no dismissal of its own. A window where something takes typed text spends `q` on
 | `svg` | One document, rasterized at each size it is drawn |
 | `gif_viewer` | An animation playing at its own frame rate |
 | `image_gallery` | A grid of pictures against a bounded upload budget |
+| `effects_lab` | Drag a lamp or glass lens, aim lights, switch neon, and tune animated fire |
 | `animation` | Easings side by side, and a spring that follows clicks |
 | `a11y` | A panel that describes itself: roles, values, states, actions |
 | `painting` | Freeform paths: polygons, curves, an even-odd hole, dashes, and freehand drawing |
@@ -142,6 +143,7 @@ typing, as any window with a field in it must; escape still closes them.
 | `list_example` | A log pinned to its newest line, with a scrollbar |
 | `data_table` | A table with a fixed header and virtualized rows |
 | `image_gallery` | A grid of pictures against a bounded upload budget |
+| `effects_lab` | Six interactive software effects over producer-owned artwork |
 | `animation` | Easings side by side, and a spring that follows clicks |
 | `gif_viewer` | An animation playing at its own frame rate |
 | `image_loading` | A picture that arrives, and one that never will |
@@ -172,6 +174,31 @@ arithmetic, easings, springs, gradients, the text field — against dry-run and 
 sessions, which is the same code path a live host drives. What they cannot check is what a
 pane does with a frame, and that stays the manual acceptance the Rust examples carry.
 
+## Effects canvas
+
+Run `cargo run --release --example effects_lab` in a Vivido pane. Select a scene and click its parameter buttons to cycle values. The lighting scenes use raised surfaces as blockers. Glow and fire use emitter shapes or a raster-sized alpha mask. Liquid glass refracts the supplied canvas artwork, including an optional straight-alpha RGBA backdrop.
+
+Build an `EffectScene` once and keep it in the view. Pass its shared handle and current parameters to `vlib::vui::effects::effect_canvas`. The returned element accepts ordinary size and pointer handlers. Geometry and light positions use logical canvas units. The raster can contain up to 65,532 pixels within the SDK's overlay record ceiling. Hosts can negotiate smaller limits. The lab uses 288 × 144 samples in Rust and TypeScript and 144 × 72 in Python.
+
+For example, this glow follows the rounded shape marked as an emitter. Keep the resulting `scene` in application state.
+
+```rust
+use std::rc::Rc;
+use vlib::vui::{Color, effects::{Effect, EffectScene, Surface, effect_canvas}};
+
+let badge = Surface {
+    rect: [16., 16., 64., 32.], radius: 8., color: Color(0x263444ff),
+    elevation: 0, emitter: true,
+};
+let scene = Rc::new(EffectScene::new(
+    [96., 64.], [192, 128], Color(0x141920ff), None, &[badge], None,
+)?);
+let glow = Effect::Glow { color: [69, 222, 213], radius: 6., intensity: 0.9 };
+let badge_element = effect_canvas("badge", scene.clone(), glow);
+```
+
+The scene also exposes `render` for offscreen use. Fire takes elapsed seconds and a seed. A glass wave takes its center and age in seconds. Schedule redraws while these values change. [Rust gallery source](examples/views/effects_lab.rs)
+
 ## Testing a UI without a GPU
 
 `testing` gives a `TestUi` that drives the same loop the application does against the SDK's
@@ -200,5 +227,4 @@ elements, the application loop, input routing, focus, key bindings, text shaping
 floating layers, drag and drop, virtualized lists, images and SVG, animation, accessibility,
 freeform drawing, and the headless harness.
 
-Every example is driven end to end against the SDK's in-process presenter. None has yet been run
-in a live Vivido pane — see the overlay stack's acceptance notes for what that would confirm.
+Every example is driven end to end against the SDK's in-process presenter. The effects lab has also been exercised in a live Vivido pane.

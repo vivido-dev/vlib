@@ -66,6 +66,7 @@ pub(crate) fn paint(
         clock,
     };
     painter.node(root, None)?;
+    painter.assets.finish_effects(overlay)?;
     Ok(Painted {
         canvas: painter.canvas,
         regions: painter.regions,
@@ -258,6 +259,19 @@ impl<'a> Painter<'a> {
             }
             NodeKind::Input(field) => {
                 self.field(field, bounds, region, state)?;
+            }
+            NodeKind::Effect(spec) => {
+                self.box_style(style, bounds)?;
+                if let Some(id) = region {
+                    let asset = self.assets.effect(self.overlay, id, spec)?;
+                    self.canvas
+                        .push(Command::Image {
+                            asset,
+                            rect: bounds.to_wire()?,
+                            opacity: u16::MAX,
+                        })
+                        .map_err(limit)?;
+                }
             }
             NodeKind::Image(image) => {
                 self.box_style(style, bounds)?;
