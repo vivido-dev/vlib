@@ -1,4 +1,7 @@
-//! Software lighting and optical effects for a producer-owned canvas.
+//! Lighting and optical effects for a producer-owned canvas.
+//!
+//! [`vector`] draws scalable effects directly on the host canvas.
+//! [`EffectScene`] prepares pixel artwork for the software renderer.
 //!
 //! Build the artwork once, retain the scene, and change the effect as input arrives.
 //! Geometry is in canvas-local logical units. Raster dimensions are independent.
@@ -11,6 +14,7 @@ use crate::vui::node::NodeKind;
 use crate::vui::{Color, Div, ElementId, div};
 
 mod render;
+pub mod vector;
 
 /// Largest RGBA image that fits the SDK's 256 KiB overlay record with its 16-byte header.
 const MAX_PIXELS: usize = (256 * 1024 - 16) / 4;

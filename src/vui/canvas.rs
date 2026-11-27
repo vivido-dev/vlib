@@ -69,6 +69,27 @@ impl Drawing<'_> {
         self.bounds
     }
 
+    /// Paint a self-contained vector layer with the SDK drawing vocabulary.
+    ///
+    /// Saved transforms and clips are local to this layer. Errors propagate to the frame.
+    pub fn layer(&mut self, paint: impl FnOnce(&mut Canvas) -> Result<(), InvalidScene>) {
+        use vivid_protocol::vector::Command;
+        let mut layer = Canvas::new();
+        let result = paint(&mut layer)
+            .and_then(|()| layer.validate())
+            .and_then(|()| {
+                self.canvas.push(Command::Save)?;
+                for command in layer.commands() {
+                    self.canvas.push(command.clone())?;
+                }
+                self.canvas.push(Command::Restore)?;
+                Ok(())
+            });
+        if let Err(error) = result {
+            self.refused(error);
+        }
+    }
+
     /// Fill a path.
     pub fn fill(&mut self, path: impl IntoPath, brush: Brush) {
         let Some(path) = self.geometry(path) else {
@@ -363,6 +384,12 @@ impl CanvasEl {
     /// A stylus or trackpad pressed with force, which is what a brush width can follow.
     pub fn on_pressure(mut self, handler: crate::vui::interactive::Handler) -> Self {
         self.node.interactions.handlers.pressure = Some(handler);
+        self
+    }
+
+    /// Follow pointer entry and exit on the drawing.
+    pub fn on_hover(mut self, handler: crate::vui::interactive::Handler) -> Self {
+        self.node.interactions.handlers.hover = Some(handler);
         self
     }
 

@@ -77,7 +77,7 @@ no dismissal of its own. A window where something takes typed text spends `q` on
 | `svg` | One document, rasterized at each size it is drawn |
 | `gif_viewer` | An animation playing at its own frame rate |
 | `image_gallery` | A grid of pictures against a bounded upload budget |
-| `effects_lab` | Drag a lamp or glass lens, aim lights, switch neon, and tune animated fire |
+| `effects_lab` | Drag a lamp or lens, tune fire and neon, send a pulse, or strike an arc |
 | `animation` | Easings side by side, and a spring that follows clicks |
 | `a11y` | A panel that describes itself: roles, values, states, actions |
 | `painting` | Freeform paths: polygons, curves, an even-odd hole, dashes, and freehand drawing |
@@ -143,7 +143,7 @@ typing, as any window with a field in it must; escape still closes them.
 | `list_example` | A log pinned to its newest line, with a scrollbar |
 | `data_table` | A table with a fixed header and virtualized rows |
 | `image_gallery` | A grid of pictures against a bounded upload budget |
-| `effects_lab` | Six interactive software effects over producer-owned artwork |
+| `effects_lab` | Eight interactive effects drawn at display resolution |
 | `animation` | Easings side by side, and a spring that follows clicks |
 | `gif_viewer` | An animation playing at its own frame rate |
 | `image_loading` | A picture that arrives, and one that never will |
@@ -176,9 +176,31 @@ pane does with a frame, and that stays the manual acceptance the Rust examples c
 
 ## Effects canvas
 
-Run `cargo run --release --example effects_lab` in a Vivido pane. Select a scene and click its parameter buttons to cycle values. The lighting scenes use raised surfaces as blockers. Glow and fire use emitter shapes or a raster-sized alpha mask. Liquid glass refracts the supplied canvas artwork, including an optional straight-alpha RGBA backdrop.
+Run `cargo run --release --example effects_lab` in a Vivido pane. The eight scenes use native vector paths, gradients, shadows, and text. Each redraw scales the artwork to the current stage, including on HiDPI displays. Select a tab and use its parameter buttons to change the effect.
 
-Build an `EffectScene` once and keep it in the view. Pass its shared handle and current parameters to `vlib::vui::effects::effect_canvas`. The returned element accepts ordinary size and pointer handlers. Geometry and light positions use logical canvas units. The raster can contain up to 65,532 pixels within the SDK's overlay record ceiling. Hosts can negotiate smaller limits. The lab uses 288 × 144 samples in Rust and TypeScript and 144 × 72 in Python.
+In **Pulse**, click the stage for a ripple or press the blue arrow to send a ping across to the inbox. **Electricity** has a branching arc between two terminals, current around a card, a button that charges on hover, and a short discharge to the point you click.
+
+Applications can draw the same effects through `vlib::vui::effects::vector`. Use `lamp`, `flashlight`, and `god_rays` with a `Scene` containing your logical bounds and surfaces. Use `glow` for a panel or `glow_path` for lettering, and place `fire` along a baseline. For `liquid_glass`, supply a lens and a callback that replays the background and foreground beneath it. Keep hit regions and input handling outside that callback.
+
+The animation passes take time from your application. Combine `radar`, `pulse`, `ping`, and `ripple` for Pulse, or `electric_arc`, `electric_border`, `charge`, and `zap` for Electricity. Coordinates and stroke widths follow the canvas transform. For example, this draws an animated fire bed across the bottom of a canvas element.
+
+```rust
+use vlib::vui::{canvas, effects::vector::{self, Rect}};
+
+let flames = canvas(move |drawing, bounds| {
+    drawing.layer(|c| {
+        let x = f64::from(bounds.origin.x.0);
+        let y = f64::from(bounds.origin.y.0);
+        let w = f64::from(bounds.width().0);
+        let h = f64::from(bounds.height().0);
+        vector::fire(c, Rect::new(x, y, w, h)?, [x, y + h - 2.], w, h * 0.7, 0.8, elapsed)
+    });
+});
+```
+
+The view supplies `elapsed` in seconds and requests frames while the fire is moving. [Gallery composition](examples/views/lab_stage.rs)
+
+For software rendering over an RGBA backdrop or emission mask, build an `EffectScene` once and keep it in the view. Pass its shared handle and current parameters to `vlib::vui::effects::effect_canvas`. The returned element accepts ordinary size and pointer handlers. Geometry and light positions use logical canvas units. The raster can contain up to 65,532 pixels within the SDK's overlay record ceiling. Hosts can negotiate smaller limits.
 
 For example, this glow follows the rounded shape marked as an emitter. Keep the resulting `scene` in application state.
 

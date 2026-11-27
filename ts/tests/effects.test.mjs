@@ -2,7 +2,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { EffectScene, Ui, rect } from "@vivido/vlib/vui";
+import {
+  EffectScene,
+  Ui,
+  rect,
+  overlay,
+  vectorEffects as fx,
+} from "@vivido/vlib/vui";
 
 function artwork() {
   const backdrop = new Uint8Array(48 * 32 * 4);
@@ -118,4 +124,36 @@ test("unmount and replacement release only this window's images", async () => {
   await uis[0].paint();
   assert.equal(ws[0].held.size, 0);
   assert.deepEqual([...ws[1].held], [1]);
+});
+
+test("vector glass replays custom artwork and releases its clip", () => {
+  const scene = { bounds: rect(480, 160, 60, 40), surfaces: [] };
+  const glass = {
+    lens: { rect: [510, 180, 5, 3], radius: 0 },
+    depth: 8,
+    dispersion: 0.2,
+    frost: 0.3,
+    wave: { center: [496, 171], age: 0.4 },
+  };
+  const triangle = new overlay.Path()
+    .moveTo(480, 160)
+    .lineTo(530, 188)
+    .lineTo(500, 192)
+    .close();
+  const canvas = new overlay.Canvas();
+  let replays = 0;
+  fx.liquidGlass(canvas, scene, glass, (c) => {
+    replays++;
+    c.fill(triangle, overlay.Brush.solid(0x4b99dfff));
+  });
+  canvas.validate();
+  assert.equal(replays, 4);
+  assert.throws(
+    () =>
+      fx.liquidGlass(canvas, scene, glass, () => {
+        throw new Error("artwork failed");
+      }),
+    /artwork failed/,
+  );
+  canvas.validate();
 });

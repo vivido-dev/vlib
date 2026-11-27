@@ -227,6 +227,95 @@ fn dispersion_does_not_reveal_rgb_from_transparent_artwork() {
     }
 }
 
+/// A second application can replay arbitrary vector content through a lens at any origin.
+#[test]
+fn vector_glass_replays_custom_artwork_and_releases_its_clip() {
+    use vivid_protocol::vector::Command;
+    use vlib::vui::effects::vector::{
+        self, Brush, Canvas, Glass, InvalidScene, Path, Rect, RoundedBox, Scene,
+    };
+
+    let bounds = Rect::new(480., 160., 60., 40.).unwrap();
+    let scene = Scene {
+        bounds,
+        surfaces: &[],
+    };
+    let lens = RoundedBox::new([510., 180., 5., 3.], 0.);
+    let glass = Glass {
+        lens,
+        depth: 8.,
+        dispersion: 0.2,
+        frost: 0.3,
+        wave: Some(Wave {
+            center: [496., 171.],
+            age: 0.4,
+        }),
+    };
+    let artwork = Path::builder()
+        .move_to(480., 160.)
+        .line_to(530., 188.)
+        .line_to(500., 192.)
+        .close()
+        .build()
+        .unwrap();
+    let mut canvas = Canvas::new();
+    vector::liquid_glass(&mut canvas, scene, glass, |c| {
+        c.fill(artwork.clone(), Brush::Solid(Color(0x4b99dfff)))?;
+        Ok(())
+    })
+    .unwrap();
+    canvas.validate().unwrap();
+    assert_eq!(
+        canvas
+            .commands()
+            .iter()
+            .filter(|cmd| matches!(cmd,Command::Fill(path,_) if path==&artwork))
+            .count(),
+        4
+    );
+    let expected = Rect::new(510., 180., 5., 3.).unwrap();
+    assert!(
+        canvas
+            .commands()
+            .iter()
+            .any(|cmd| matches!(cmd,Command::Shadow(s) if s.rect==expected))
+    );
+
+    let transparent = Surface {
+        rect: [510., 180., 5., 3.],
+        radius: 1.,
+        color: Color(0xff000000),
+        elevation: 0,
+        emitter: false,
+    };
+    let mut covered = Canvas::new();
+    vector::liquid_glass(
+        &mut covered,
+        Scene {
+            surfaces: &[transparent],
+            ..scene
+        },
+        glass,
+        |c| {
+            c.fill(artwork.clone(), Brush::Solid(Color(0x4b99dfff)))?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        canvas, covered,
+        "transparent surfaces must not tint the lens"
+    );
+
+    let mut failed = Canvas::new();
+    let err = InvalidScene::new("artwork failed");
+    assert_eq!(
+        vector::liquid_glass(&mut failed, scene, glass, |_| Err(err)),
+        Err(err)
+    );
+    failed.validate().unwrap();
+}
+
 #[cfg(feature = "testing")]
 mod ui {
     use super::lab::Lab;
@@ -234,19 +323,6 @@ mod ui {
     use vivid_protocol::vector::Command;
     use vlib::vui::testing::TestUi;
 
-    fn asset(ui: &TestUi<Lab>) -> u64 {
-        ui.canvas()
-            .commands()
-            .iter()
-            .find_map(|c| {
-                if let Command::Image { asset, .. } = c {
-                    Some(*asset)
-                } else {
-                    None
-                }
-            })
-            .unwrap()
-    }
     #[test]
     fn a_captured_lamp_drag_uses_stage_coordinates_at_both_sizes() {
         for (width, height) in [(624., 442.), (460., 322.)] {
@@ -278,32 +354,111 @@ mod ui {
     }
 
     #[test]
-    fn gallery_switches_and_replaces_only_the_visible_canvas() {
-        let mut ui = TestUi::start(Lab::new().unwrap(), 624., 442.).unwrap();
-        let first = asset(&ui);
+    fn send_reaches_the_inbox_and_charging_the_button_does_not_zap_it() {
+        let mut ui = TestUi::start(Lab::new().unwrap(), 460., 322.).unwrap();
+        ui.focus_window().unwrap();
+        ui.click("scene-6").unwrap();
+        let b = ui.bounds("stage").unwrap();
+        let local = |x: f64, y: f64| {
+            (
+                f64::from(b.origin.x.0) + x * f64::from(b.width().0) / 288.,
+                f64::from(b.origin.y.0) + y * f64::from(b.height().0) / 144.,
+            )
+        };
+        let click = |ui: &mut TestUi<Lab>, (x, y): (f64, f64)| {
+            for down in [true, false] {
+                ui.presenter()
+                    .overlay_pointer(x, y, Some((0, down)), u32::from(down))
+                    .unwrap();
+            }
+            ui.settle().unwrap();
+        };
+        let clips = |ui: &TestUi<Lab>| {
+            ui.canvas()
+                .commands()
+                .iter()
+                .filter(|c| matches!(c, Command::Clip(_)))
+                .count()
+        };
+        let base = clips(&ui);
+        click(&mut ui, local(54., 100.));
+        ui.advance(Duration::from_millis(150)).unwrap();
+        assert_eq!(clips(&ui), base);
+        ui.advance(Duration::from_millis(400)).unwrap();
+        assert_eq!(
+            clips(&ui),
+            base + 1,
+            "the arriving ripple is clipped to the inbox"
+        );
+        ui.click("scene-7").unwrap();
+        let charge = |ui: &TestUi<Lab>| {
+            ui.canvas()
+                .commands()
+                .iter()
+                .any(|c| matches!(c,Command::Shadow(s) if s.color.0>>8==0x5fceff))
+        };
+        let button = local(207., 100.);
+        ui.move_pointer(button.0, button.1).unwrap();
+        ui.advance(Duration::from_millis(400)).unwrap();
+        assert!(charge(&ui));
+        click(&mut ui, button);
+        assert_eq!(ui.read(|s| s.shots.len()), 0);
+        let outside = local(102., 82.);
+        ui.move_pointer(outside.0, outside.1).unwrap();
+        click(&mut ui, outside);
+        assert_eq!(ui.read(|s| s.shots.len()), 1);
+        ui.advance(Duration::from_millis(500)).unwrap();
+        assert!(!charge(&ui));
+        assert_eq!(ui.read(|s| s.shots.len()), 0);
+    }
+
+    #[test]
+    fn gallery_draws_scalable_geometry_and_animates_only_active_scenes() {
+        let mut ui = TestUi::start(Lab::new().unwrap(), 760., 510.).unwrap();
+        let initial = ui.canvas();
+        let scale = ui.bounds("stage").unwrap().width().0 as f64 / 288.;
+        assert!(
+            initial
+                .commands()
+                .iter()
+                .any(|c| matches!(c,Command::Transform(t) if (t.0[0].get()-scale).abs()<1e-6))
+        );
         ui.advance(Duration::from_secs(1)).unwrap();
-        assert_eq!(first, asset(&ui));
+        assert_eq!(initial, ui.canvas());
         assert!(ui.wake_in().is_none());
-        for i in 1..6 {
+        for i in 0..8 {
             ui.click(&format!("scene-{i}")).unwrap();
             assert_eq!(ui.read(|s| s.selected), i);
             ui.click("knob-0").unwrap();
-            assert_eq!(ui.retained_images(), 1);
-            if i == 4 {
-                let mut previous = asset(&ui);
-                for _ in 0..12 {
-                    ui.advance(Duration::from_millis(80)).unwrap();
-                    assert_ne!(asset(&ui), previous);
-                    previous = asset(&ui);
-                    assert_eq!(ui.retained_images(), 1);
+            assert_eq!(ui.retained_images(), 0);
+            let before = ui.canvas();
+            assert!(
+                !before
+                    .commands()
+                    .iter()
+                    .any(|c| matches!(c, Command::Image { .. }))
+            );
+            if matches!(i, 4 | 6 | 7) {
+                assert!(ui.wake_in().is_some());
+                ui.advance(Duration::from_millis(125)).unwrap();
+                assert_ne!(before, ui.canvas());
+            }
+            if i == 5 {
+                assert!(ui.wake_in().is_none());
+                ui.click("stage").unwrap();
+                assert!(ui.wake_in().is_some());
+                ui.advance(Duration::from_secs(2)).unwrap();
+                assert!(ui.wake_in().is_none());
+            }
+            if i >= 6 {
+                for _ in 0..10 {
+                    ui.click("stage").unwrap();
                 }
+                assert_eq!(ui.read(|s| s.shots.len()), 8);
+                ui.advance(Duration::from_secs(2)).unwrap();
+                assert_eq!(ui.read(|s| s.shots.len()), 0);
             }
         }
-        assert!(ui.wake_in().is_none());
-        ui.click("stage").unwrap();
-        assert!(ui.wake_in().is_some());
-        ui.advance(Duration::from_secs(2)).unwrap();
-        assert!(ui.wake_in().is_none());
     }
 }
 #[cfg(feature = "testing")]

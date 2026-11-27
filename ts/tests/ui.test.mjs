@@ -422,12 +422,20 @@ test("the effect gallery maps clicks into its resized canvas", async () => {
     await ui.paint();
     const stage = ui.boundsOf("stage");
     assert.equal(stage.width, 2 * stage.height);
-    for (let i = 0; i < 6; i++) {
+    for (const i of [0, 1, 2, 3, 4, 6, 7, 5]) {
       const tab = ui.regionId(`scene-${i}`);
       await ui.dispatch(pointer(tab, 0, 0, 0, true, 1));
       await ui.dispatch(pointer(tab, 0, 0, 0, false));
       await ui.paint();
       assert.equal(ui.read(s => s.selected), i);
+      if (i === 6 || i === 7) {
+        const x = stage.x + stage.width * 54 / 288, y = stage.y + stage.height * 100 / 144;
+        const target = ui.regionId("stage");
+        await ui.dispatch(pointer(target, x, y, 0, true, 1));
+        await ui.dispatch(pointer(target, x, y, 0, false));
+        await ui.paint();
+        assert.equal(ui.read(s => s.shots.length), 1);
+      }
     }
     const target = ui.regionId("stage");
     await ui.dispatch(pointer(target, stage.x + 5, stage.y + 5, 0, true, 1));

@@ -108,6 +108,19 @@ host drives. What they cannot check is what a pane does with a frame.
 
 ## Effects canvas
 
-Run `python examples/python/effects_lab.py` in a Vivido pane. The gallery shares six scenes with Rust. Prepare an `EffectScene` from logical dimensions, raster dimensions, background color, and surfaces. An optional RGBA backdrop supplies the pixels for glass to refract. Emissive surfaces and an optional alpha mask feed glow and fire.
+Run `python examples/python/effects_lab.py` in a Vivido pane. The gallery draws all eight scenes as native vectors at the current display scale. Click Send in Pulse to ping the inbox. Hover Charged or click the stage in Electricity.
+
+Import `vlib.vui.vector_effects` to use the gallery renderer on your own overlay canvas. Draw lights with `lamp`, `flashlight`, and `god_rays` using scene bounds and elevated surfaces in logical units. Use `glow` for panels, `glow_path` for paths, and `fire` for a flame bed. For `liquid_glass`, supply a lens and a paint-only callback that replays the underlying artwork.
+
+The animated passes include `radar`, `pulse`, `ping`, `ripple`, `electric_arc`, `electric_border`, `charge`, and `zap`. Apply the canvas transform and clip for your view, then supply the current phase or elapsed time on each redraw. [Gallery composition](examples/python/lab/stage.py)
+
+```python
+from vlib.vui import vector_effects as fx
+
+fx.fire(frame.canvas, bounds, (bounds.x, bounds.y + bounds.height - 2),
+        width=bounds.width, height=bounds.height * 0.7, embers=0.8, time=frame.elapsed)
+```
+
+For software rendering, prepare an `EffectScene` from logical dimensions, raster dimensions, background color, and surfaces. An optional RGBA backdrop supplies the pixels for glass to refract. Emissive surfaces and an optional alpha mask feed glow and fire.
 
 Draw with `Frame.effect_canvas(name, bounds, scene, effect)`. Keep the scene and canvas name stable across frames so unchanged artwork can reuse its upload. [Gallery source](examples/python/effects_lab.py)

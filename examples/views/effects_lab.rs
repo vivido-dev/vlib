@@ -1,101 +1,74 @@
-//! Scene artwork and interactions for the six-pass effect gallery.
+//! Interactive vector scenes for the effects gallery.
 
 // Rust guideline compliant 2026-10-07
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::{io, rc::Rc, time::Duration};
-use vlib::vui::Div;
-use vlib::vui::effects::{Effect, EffectScene, Light, Surface, Wave, effect_canvas};
+use vivid_protocol::vector::{Command, Path, Rect, Transform};
+use vlib::vui::effects::Surface;
 use vlib::vui::prelude::*;
+use vlib::vui::{Color, Div, canvas::canvas};
+
+#[path = "lab_stage.rs"]
+mod stage;
 
 const SPACE: [f64; 2] = [288., 144.];
-const RASTER: [usize; 2] = [288, 144];
-const COLORS: [[u8; 3]; 4] = [
-    [69, 222, 213],
-    [233, 109, 164],
-    [255, 169, 80],
-    [133, 150, 255],
-];
 #[derive(Deserialize)]
 struct Knob {
     label: String,
     values: Vec<f64>,
     initial: usize,
 }
-#[derive(Deserialize)]
-struct Mask {
-    origin: [usize; 2],
-    scale: usize,
-    rows: Vec<String>,
+#[derive(Clone, Copy)]
+struct Ink(Color);
+impl<'de> Deserialize<'de> for Ink {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        u32::from_str_radix(&s, 16)
+            .map(|rgb| Self(Color(rgb << 8 | 255)))
+            .map_err(serde::de::Error::custom)
+    }
 }
-type ArtRect = ([f64; 4], f64, String, u8, bool);
 #[derive(Deserialize)]
 struct Page {
     name: String,
     hint: String,
-    background: String,
+    background: Ink,
+    horizon: Ink,
     position: [f64; 2],
     controls: Vec<Knob>,
-    surfaces: Vec<ArtRect>,
-    mask: Option<Mask>,
+    #[serde(deserialize_with = "read_surfaces")]
+    surfaces: Vec<Surface>,
+    labels: Vec<(f64, f64, f64, String, Ink, u16)>,
+}
+fn read_surfaces<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Surface>, D::Error> {
+    let entries = Vec::<([f64; 4], f64, Ink, u8)>::deserialize(d)?;
+    Ok(entries
+        .into_iter()
+        .map(|(rect, radius, ink, elevation)| Surface {
+            rect,
+            radius,
+            color: ink.0,
+            elevation,
+            emitter: false,
+        })
+        .collect())
 }
 
-fn tint(s: &str) -> io::Result<Color> {
-    Ok(rgb(u32::from_str_radix(s, 16).map_err(io::Error::other)?))
-}
-
-impl Page {
-    fn scene(&self) -> io::Result<EffectScene> {
-        let surfaces = self
-            .surfaces
-            .iter()
-            .map(|(rect, radius, color, elevation, emitter)| {
-                Ok(Surface {
-                    rect: *rect,
-                    radius: *radius,
-                    color: tint(color)?,
-                    elevation: *elevation,
-                    emitter: *emitter,
-                })
-            })
-            .collect::<io::Result<Vec<_>>>()?;
-        let mask = self.mask.as_ref().map(|mask| {
-            let mut alpha = vec![0; RASTER[0] * RASTER[1]];
-            for (i, a) in alpha.iter_mut().enumerate() {
-                let x = i % RASTER[0];
-                let y = i / RASTER[0];
-                if x >= mask.origin[0]
-                    && y >= mask.origin[1]
-                    && mask
-                        .rows
-                        .get((y - mask.origin[1]) / mask.scale)
-                        .and_then(|s| s.as_bytes().get((x - mask.origin[0]) / mask.scale))
-                        == Some(&b'1')
-                {
-                    *a = 255;
-                }
-            }
-            alpha
-        });
-        EffectScene::new(
-            SPACE,
-            RASTER,
-            tint(&self.background)?,
-            None,
-            &surfaces,
-            mask.as_deref(),
-        )
-    }
+#[derive(Clone, Copy, Debug)]
+pub struct Shot {
+    pub at: [f64; 2],
+    pub start: f64,
 }
 
 pub struct Lab {
-    pages: Vec<Page>,
-    art: Vec<Rc<EffectScene>>,
+    pages: Vec<Rc<Page>>,
+    pub shots: Vec<Shot>,
     pub selected: usize,
     indices: Vec<Vec<usize>>,
     pub position: [f64; 2],
     grab: Option<[f64; 2]>,
     tap: Option<[f64; 2]>,
-    wave: Option<([f64; 2], f64)>,
+    wave: Option<Shot>,
     from: f64,
     target: f64,
     changed: f64,
@@ -105,18 +78,14 @@ impl Lab {
     pub fn new() -> io::Result<Self> {
         let pages: Vec<Page> = serde_json::from_str(include_str!("../assets/effects_lab.json"))
             .map_err(io::Error::other)?;
-        let art = pages
-            .iter()
-            .map(|p| p.scene().map(Rc::new))
-            .collect::<io::Result<_>>()?;
         let indices = pages
             .iter()
             .map(|p| p.controls.iter().map(|k| k.initial).collect())
             .collect();
         Ok(Self {
             position: pages[0].position,
-            pages,
-            art,
+            pages: pages.into_iter().map(Rc::new).collect(),
+            shots: Vec::new(),
             indices,
             selected: 0,
             grab: None,
@@ -134,8 +103,9 @@ impl Lab {
         self.grab = None;
         self.tap = None;
         self.wave = None;
-        self.from = 1.;
-        self.target = 1.;
+        self.shots.clear();
+        self.from = if index == 7 { 0. } else { 1. };
+        self.target = self.from;
         self.changed = 0.;
     }
     fn value(&self, i: usize) -> f64 {
@@ -151,88 +121,6 @@ impl Lab {
             self.from = self.level(now);
             self.target = target;
             self.changed = now;
-        }
-    }
-    fn params(&self, now: f64) -> (Effect, bool) {
-        let [x, y] = self.position;
-        let a = self.value(0);
-        let b = self.value(1);
-        let level = self.level(now);
-        let moving = self.from != self.target && now - self.changed < 0.35;
-        let mut light = Light {
-            position: [x, y],
-            height: 32.,
-            radius: 7.,
-            color: [255, 206, 152],
-            intensity: 1.5,
-            ambient: 0.48,
-        };
-        match self.selected {
-            0 => {
-                light.height = a;
-                light.radius = b;
-                light.intensity = self.value(2);
-                (Effect::Lamp(light), false)
-            }
-            1 => {
-                light.position = [x + 33., y + 44.];
-                light.height = 56.;
-                light.intensity = 2.6 * level;
-                light.ambient = b;
-                (
-                    Effect::Flashlight {
-                        light,
-                        aim: [x, y],
-                        beam: a,
-                    },
-                    moving,
-                )
-            }
-            2 => {
-                light.height = 35.;
-                light.radius = 25.;
-                light.ambient = 0.33;
-                light.intensity = a * level;
-                (Effect::GodRays { light, softness: b }, moving)
-            }
-            3 => (
-                Effect::Glow {
-                    color: COLORS[a as usize],
-                    radius: b,
-                    intensity: self.value(2) * level,
-                },
-                moving,
-            ),
-            4 => (
-                Effect::Fire {
-                    height: a,
-                    speed: b,
-                    embers: self.value(2),
-                    time: if b > 0. { now } else { 0. },
-                    seed: 19,
-                },
-                b > 0.,
-            ),
-            _ => {
-                let wave = self
-                    .wave
-                    .map(|(center, start)| Wave {
-                        center,
-                        age: now - start,
-                    })
-                    .filter(|w| w.age < 1.);
-                (
-                    Effect::LiquidGlass {
-                        center: [x, y],
-                        size: [80., 42.],
-                        depth: a,
-                        dispersion: b,
-                        frost: self.value(2),
-                        wave,
-                    },
-                    wave.is_some(),
-                )
-            }
         }
     }
     fn local(p: Point, cx: &Context<Self>) -> Option<[f64; 2]> {
@@ -257,7 +145,13 @@ impl Lab {
     fn click(&mut self, now: f64) {
         if let Some(p) = self.tap.take() {
             match self.selected {
-                5 => self.wave = Some((p, now)),
+                5 => self.wave = Some(Shot { at: p, start: now }),
+                6 | 7 if self.selected == 6 || !charged(p) => {
+                    if self.shots.len() == 8 {
+                        self.shots.remove(0);
+                    }
+                    self.shots.push(Shot { at: p, start: now });
+                }
                 3 if (24.0..=151.).contains(&p[0]) && (36.0..=108.).contains(&p[1]) => {
                     self.fade(self.target == 0., now)
                 }
@@ -291,6 +185,10 @@ impl Lab {
     }
 }
 
+fn charged([x, y]: [f64; 2]) -> bool {
+    (165.0..=249.).contains(&x) && (90.0..=110.).contains(&y)
+}
+
 fn button(label: String, active: bool) -> Div {
     div()
         .rounded(6.)
@@ -307,14 +205,36 @@ fn button(label: String, active: bool) -> Div {
 impl Render for Lab {
     fn render(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let now = cx.elapsed().as_secs_f64();
-        let (effect, moving) = self.params(now);
-        if moving {
-            cx.request_frame_after(Duration::from_millis(56));
-        }
         let selected = self.selected;
-        let page = &self.pages[selected];
-        let compact = cx.size().width.0 < 520.;
-        let columns = if compact { 3 } else { 6 };
+        let page = self.pages[selected].clone();
+        let knobs = [
+            self.value(0),
+            self.value(1),
+            if page.controls.len() > 2 {
+                self.value(2)
+            } else {
+                0.
+            },
+        ];
+        self.shots
+            .retain(|shot| now - shot.start < if selected == 6 { 1.4 } else { 0.42 });
+        let level = self.level(now);
+        let wave = self.wave.filter(|sh| now - sh.start < 1.);
+        let moving = (self.from != self.target && now - self.changed < 0.35)
+            || (selected == 4 && knobs[1] > 0.)
+            || selected >= 6
+            || wave.is_some();
+        if moving {
+            cx.request_frame_after(Duration::from_millis(33));
+        }
+        let columns = if cx.size().width.0 >= 720. {
+            8
+        } else if cx.size().width.0 >= 354. {
+            4
+        } else {
+            2
+        };
+        let tab_rows = self.pages.len().div_ceil(columns);
         let tabs = self.pages.chunks(columns).enumerate().map(|(row, pages)| {
             div()
                 .flex()
@@ -332,7 +252,7 @@ impl Render for Lab {
                         }))
                 }))
         });
-        let knobs = page.controls.iter().enumerate().map(|(i, k)| {
+        let buttons = page.controls.iter().enumerate().map(|(i, k)| {
             let v = self.value(i);
             let value = if selected == 3 && i == 0 {
                 ["Mint", "Rose", "Amber", "Blue"][v as usize].to_owned()
@@ -348,9 +268,12 @@ impl Render for Lab {
                 }))
         });
         let width = (cx.size().width.0 - 32.).max(1.);
-        let height = (cx.size().height.0 - if compact { 191. } else { 152. })
+        let height = (cx.size().height.0 - (152. + 39. * (tab_rows - 1) as f32))
             .max(1.)
             .min(width * 0.5);
+        let artwork = page.clone();
+        let shots = self.shots.clone();
+        let pos = self.position;
         div()
             .id("lab")
             .flex_col()
@@ -358,6 +281,12 @@ impl Render for Lab {
             .gap(9.)
             .bg(rgb(0x18202a))
             .on_mouse_move(cx.listener(|s: &mut Self, e, cx| {
+                if s.selected == 7
+                    && let Some(p) = e.position().and_then(|p| Self::local(p, cx))
+                {
+                    s.fade(charged(p), cx.elapsed().as_secs_f64());
+                    cx.notify();
+                }
                 if let Some(p) = e.position().and_then(|p| Self::local(p, cx))
                     && s.motion(p)
                 {
@@ -372,31 +301,58 @@ impl Render for Lab {
             }))
             .children(tabs)
             .child(
-                effect_canvas("stage", self.art[selected].clone(), effect)
-                    .size(height * 2., height)
-                    .on_mouse_down(cx.listener(|s: &mut Self, e, cx| {
-                        if let Some(p) = e.position().and_then(|p| Self::local(p, cx)) {
-                            if s.press(p) {
-                                let _ = cx.capture_pointer(true);
-                            }
-                            cx.notify();
+                canvas(move |drawing, bounds| {
+                    drawing.layer(|c| {
+                        let scale = f64::from(bounds.width().0) / SPACE[0];
+                        c.push(Command::Transform(Transform::new([
+                            scale,
+                            0.,
+                            0.,
+                            scale,
+                            f64::from(bounds.origin.x.0),
+                            f64::from(bounds.origin.y.0),
+                        ])?))?;
+                        c.push(Command::Clip(Path::rectangle(Rect::new(
+                            0., 0., 288., 144.,
+                        )?)?))?;
+                        stage::Stage {
+                            page: &artwork,
+                            index: selected,
+                            pos,
+                            knobs,
+                            level,
+                            now,
+                            wave,
+                            shots: &shots,
                         }
-                    }))
-                    .on_click(cx.listener(|s: &mut Self, _, cx| {
-                        s.click(cx.elapsed().as_secs_f64());
+                        .draw(c)
+                    });
+                })
+                .id("stage")
+                .size(height * 2., height)
+                .on_mouse_down(cx.listener(|s: &mut Self, e, cx| {
+                    if let Some(p) = e.position().and_then(|p| Self::local(p, cx)) {
+                        if s.press(p) {
+                            let _ = cx.capture_pointer(true);
+                        }
                         cx.notify();
-                    }))
-                    .on_hover(cx.listener(|s: &mut Self, e, cx| {
-                        if matches!(s.selected, 1 | 2)
-                            && let UiEvent::Hover { entered } = e
-                        {
-                            s.fade(*entered, cx.elapsed().as_secs_f64());
-                            cx.notify();
-                        }
-                    })),
+                    }
+                }))
+                .on_click(cx.listener(|s: &mut Self, _, cx| {
+                    s.click(cx.elapsed().as_secs_f64());
+                    cx.notify();
+                }))
+                .on_hover(cx.listener(|s: &mut Self, e, cx| {
+                    if let UiEvent::Hover { entered } = e
+                        && (matches!(s.selected, 1 | 2) || (s.selected == 7 && !entered))
+                    {
+                        s.fade(*entered, cx.elapsed().as_secs_f64());
+                        cx.notify();
+                    }
+                })),
             )
             .child(text(page.hint.clone()).size(13.).color(rgb(0xc6cdd3)))
-            .child(div().flex().gap(6.).children(knobs))
+            .child(div().flex().gap(6.).children(buttons))
             .child(
                 div()
                     .id("resize")

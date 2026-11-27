@@ -1353,3 +1353,7 @@ export async function runMain(make: () => Ui<any>, self: string): Promise<void> 
   })();
   if (same) await make().run();
 }
+
+export { pulseRing, electricArc } from "./vector-effects.js";
+
+export * as vectorEffects from "./vector-effects.js";

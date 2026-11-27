@@ -1,4 +1,4 @@
-"""An interactive gallery of six producer-rendered lighting and optical effects."""
+"""An interactive gallery of eight resolution-independent vector effects."""
 
 from __future__ import annotations
 
@@ -8,63 +8,21 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from vlib.vui import Frame, PointerEvent, Rect, Ui, duration
-from vlib.vui.effects import (
-    Effect,
-    EffectScene,
-    Fire,
-    Flashlight,
-    Glow,
-    GodRays,
-    Lamp,
-    Light,
-    LiquidGlass,
-    RGB,
-    Surface,
-    Wave,
-    XY,
-)
+from lab.stage import Shot, XY, draw, scene_for
 
-COLORS: Tuple[RGB, ...] = (
-    (69, 222, 213),
-    (233, 109, 164),
-    (255, 169, 80),
-    (133, 150, 255),
-)
 COLOR_NAMES = ("Mint", "Rose", "Amber", "Blue")
-SPACE = (288, 144)
-# A smaller sampling grid keeps the interpreted software renderer interactive.
-RASTER = (144, 72)
 
 
-def scene(page: Dict[str, Any]) -> EffectScene:
-    shapes = [
-        Surface(tuple(rect), r, int(color + "ff", 16), z, emit)
-        for rect, r, color, z, emit in page["surfaces"]
-    ]
-    mask = None
-    if "mask" in page:
-        m = page["mask"]
-        ox, oy = m["origin"]
-        scale = m["scale"]
-        rows = m["rows"]
-        w, h = RASTER
-        alpha = bytearray(w * h)
-        for i in range(w * h):
-            x = int(((i % w + 0.5) * SPACE[0] / w - ox) // scale)
-            y = int(((i // w + 0.5) * SPACE[1] / h - oy) // scale)
-            if 0 <= y < len(rows) and 0 <= x < len(rows[y]) and rows[y][x] == "1":
-                alpha[i] = 255
-        mask = bytes(alpha)
-    return EffectScene(
-        SPACE, RASTER, int(page["background"] + "ff", 16), shapes, mask=mask
-    )
+def charged(p: XY) -> bool:
+    return 165 <= p[0] <= 249 and 90 <= p[1] <= 110
 
 
 class Lab:
     def __init__(self) -> None:
         path = Path(__file__).resolve().parents[1] / "assets" / "effects_lab.json"
         self.pages: List[Dict[str, Any]] = json.loads(path.read_text())
-        self.art = [scene(p) for p in self.pages]
+        self.scenes = [scene_for(page) for page in self.pages]
+        self.shots: List[Shot] = []
         self.indices: List[List[int]] = [
             [k["initial"] for k in p["controls"]] for p in self.pages
         ]
@@ -79,7 +37,8 @@ class Lab:
         self.position = tuple(self.pages[index]["position"])
         self.grab = self.wave = None
         self.tap: Optional[XY] = None
-        self.start = self.target = 1.0
+        self.shots.clear()
+        self.start = self.target = 0.0 if index == 7 else 1.0
         self.changed = 0.0
         self.hovered = False
 
@@ -98,33 +57,6 @@ class Lab:
         if self.target != float(on):
             self.start, self.target, self.changed = self.level(now), float(on), now
 
-    def params(self, now: float) -> Tuple[Effect, bool]:
-        a, b = self.value(0), self.value(1)
-        x, y = self.position
-        warm: RGB = (255, 206, 152)
-        level = self.level(now)
-        moving = self.start != self.target and now - self.changed < 0.35
-        if self.selected == 0:
-            return Lamp(Light((x, y), a, b, warm, self.value(2), 0.48)), False
-        if self.selected == 1:
-            return Flashlight(
-                Light((x + 33, y + 44), 56, 7, warm, 2.6 * level, b), (x, y), a
-            ), moving
-        if self.selected == 2:
-            return GodRays(Light((x, y), 35, 25, warm, a * level, 0.33), b), moving
-        if self.selected == 3:
-            return Glow(COLORS[int(a)], b, self.value(2) * level), moving
-        if self.selected == 4:
-            return Fire(a, b, self.value(2), now if b else 0.0, 19), b > 0
-        wave = (
-            Wave(self.wave[0], now - self.wave[1])
-            if self.wave and now - self.wave[1] < 1
-            else None
-        )
-        return LiquidGlass(
-            (x, y), (80, 42), a, b, self.value(2), wave
-        ), wave is not None
-
     def press(self, p: XY) -> None:
         self.tap = p
         x, y = p
@@ -141,6 +73,8 @@ class Lab:
             return
         if self.selected == 5:
             self.wave = (p, now)
+        elif self.selected == 6 or (self.selected == 7 and not charged(p)):
+            self.shots = self.shots[-7:] + [(p, now)]
         elif self.selected == 3 and 24 <= p[0] <= 151 and 36 <= p[1] <= 108:
             self.fade(not self.target, now)
 
@@ -159,9 +93,10 @@ def make_ui() -> Ui:
             s.select(i)
             f.notify()
 
-        compact = f.width < 520
+        columns = 8 if f.width >= 720 else (4 if f.width >= 354 else 2)
+        rows = math.ceil(len(s.pages) / columns)
         for i, p in enumerate(s.pages):
-            if compact and i == 3:
+            if i % columns == 0:
                 x = 16.0
             width = 19 + len(p["name"]) * 7.0
 
@@ -170,14 +105,14 @@ def make_ui() -> Ui:
 
             f.button(
                 f"scene-{i}",
-                Rect(x, 55 if compact and i >= 3 else 16, width, 30),
+                Rect(x, 16 + 39 * (i // columns), width, 30),
                 p["name"],
                 base=0x31565CFF if i == s.selected else 0x28313BFF,
                 on_click=choose,
             )
             x += width + 5
-        height = max(1.0, min((f.width - 32) / 2, f.height - (191 if compact else 152)))
-        stage = Rect(16, 94 if compact else 55, height * 2, height)
+        height = max(1.0, min((f.width - 32) / 2, f.height - (152 + 39 * (rows - 1))))
+        stage = Rect(16, 55 + 39 * (rows - 1), height * 2, height)
 
         def press(e: PointerEvent) -> None:
             s.press(
@@ -198,10 +133,36 @@ def make_ui() -> Ui:
         if s.selected in (1, 2) and hovered != s.hovered:
             s.fade(hovered, f.elapsed)
         s.hovered = hovered
-        effect, moving = s.params(f.elapsed)
-        f.effect_canvas("stage", stage, s.art[s.selected], effect)
-        if moving:
-            f.request_frame_after(0.056)
+        if s.selected == 7 and not hovered:
+            s.fade(False, f.elapsed)
+        now = f.elapsed
+        wave = s.wave if s.wave and now - s.wave[1] < 1 else None
+        s.shots = [
+            sh for sh in s.shots if now - sh[1] < (1.4 if s.selected == 6 else 0.42)
+        ]
+        knobs = [s.value(i) for i in range(len(page["controls"]))]
+        if len(knobs) == 2:
+            knobs.append(0.0)
+        draw(
+            f.canvas,
+            stage,
+            page,
+            s.selected,
+            s.position,
+            knobs,
+            s.level(now),
+            now,
+            wave,
+            s.shots,
+            s.scenes[s.selected],
+        )
+        if (
+            (s.start != s.target and now - s.changed < 0.35)
+            or (s.selected == 4 and knobs[1] > 0)
+            or s.selected >= 6
+            or wave
+        ):
+            f.request_frame_after(1 / 30)
         y = stage.y + stage.height + 9
         f.label(page["hint"], Rect(16, y, f.width - 32, 20), size=13, color=0xC6CDD3FF)
         x = 16.0
@@ -233,7 +194,7 @@ def make_ui() -> Ui:
         f.label("◢", grip, size=13, color=0x849499FF)
         f.resize_region("resize", grip, 12, "resize-down-right")
 
-    ui = Ui(lab, render, width=624, height=442, title="Effects lab")
+    ui = Ui(lab, render, width=760, height=510, title="Effects lab")
 
     def motion(e: PointerEvent) -> None:
         b = ui.bounds_of("stage")
@@ -243,6 +204,9 @@ def make_ui() -> Ui:
             (e.position.x - b.x) * 288 / b.width,
             (e.position.y - b.y) * 144 / b.height,
         )
+        if lab.selected == 7:
+            lab.fade(charged((x, y)), ui.elapsed())
+            ui.notify()
         if lab.tap is not None and math.hypot(x - lab.tap[0], y - lab.tap[1]) > 2:
             lab.tap = None
         if lab.grab is not None:

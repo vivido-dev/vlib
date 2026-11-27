@@ -107,3 +107,33 @@ def test_window_owns_only_mounted_effects() -> None:
     with pytest.raises(ValueError):
         s.render(Glow((1, 2, 3), float("nan"), 1))
 
+
+def test_vector_glass_replays_custom_artwork_and_releases_its_clip() -> None:
+    from vivid_sdk.overlay import Brush, Canvas, Path as VectorPath
+    from vlib.vui import vector_effects as fx
+
+    scene = fx.Scene(Rect(480, 160, 60, 40))
+    glass = fx.Glass(
+        fx.RoundedBox((510, 180, 5, 3), 0), 8, 0.2, 0.3, Wave((496, 171), 0.4)
+    )
+    triangle = (
+        VectorPath().move_to(480, 160).line_to(530, 188).line_to(500, 192).close()
+    )
+    replays = 0
+
+    def paint(c: Canvas) -> None:
+        nonlocal replays
+        replays += 1
+        c.fill(triangle, Brush.solid(0x4B99DFFF))
+
+    canvas = Canvas()
+    fx.liquid_glass(canvas, scene, glass, paint)
+    canvas.validate()
+    assert replays == 4
+
+    def reject(_: Canvas) -> None:
+        raise RuntimeError("artwork failed")
+
+    with pytest.raises(RuntimeError, match="artwork failed"):
+        fx.liquid_glass(canvas, scene, glass, reject)
+    canvas.validate()

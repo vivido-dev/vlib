@@ -561,12 +561,20 @@ def test_effects_lab_gestures_after_resize() -> None:
         ui.paint()
         stage = ui.bounds_of("stage")
         assert stage is not None and stage.width == 2 * stage.height
-        for i in range(6):
+        for i in (0, 1, 2, 3, 4, 6, 7, 5):
             tab = ui.region_id(f"scene-{i}")
             ui.dispatch(pointer(tab, button=0, down=True, clicks=1))
             ui.dispatch(pointer(tab, button=0, down=False))
             ui.paint()
             assert ui.read(lambda state: state.selected) == i
+            if i in (6, 7):
+                # Send a ping or a transient zap from the resized stage.
+                x, y = stage.x + stage.width * 54/288, stage.y + stage.height * 100/144
+                target = ui.region_id("stage")
+                ui.dispatch(pointer(target, x, y, 0, True, 1))
+                ui.dispatch(pointer(target, x, y, 0, False))
+                ui.paint()
+                assert ui.read(lambda state: len(state.shots)) == 1
         x, y = stage.x + 5, stage.y + 5
         target = ui.region_id("stage")
         ui.dispatch(pointer(target, x, y, 0, True, 1))
